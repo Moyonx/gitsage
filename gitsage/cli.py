@@ -867,27 +867,69 @@ def doctor() -> None:
 @app.command("install-hooks")
 def install_hooks() -> None:
     """Install gitsage git hooks into .git/hooks/."""
+    import shutil
+
     hooks_dir = Path.cwd() / ".git" / "hooks"
     if not hooks_dir.exists():
         rprint("[red].git/hooks directory not found. Are you in a git repo?[/red]")
         raise typer.Exit(1)
 
-    # Install a prepare-commit-msg hook as an example
-    hook_content = """#!/bin/bash
+    # Detect the gitsage binary path so the hook works even outside the venv
+    gitsage_bin = shutil.which("gitsage") or sys.executable.replace("python", "gitsage")
+    # Prefer the binary next to the current Python interpreter (same venv)
+    venv_gitsage = Path(sys.executable).parent / "gitsage"
+    if venv_gitsage.exists():
+        gitsage_bin = str(venv_gitsage)
+
+    hook_content = f"""#!/bin/bash
 # gitsage prepare-commit-msg hook
-# Uncomment to auto-run gitsage commit in execute mode:
-# gitsage commit --mode execute
+# Automatically generates a commit message with AI when you run `git commit`.
+#
+# How it works:
+#   1. gitsage generates a message from your staged diff
+#   2. The message is pre-filled in the editor
+#   3. You review / edit / save → commit happens
+#
+# To disable: delete .git/hooks/prepare-commit-msg
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"   # "message" when -m is used, "merge" for merges, etc.
+
+# Only auto-generate for fresh commits (skip if -m, --amend, merge, squash)
+if [ -n "$COMMIT_SOURCE" ]; then
+    exit 0
+fi
+
+# gitsage binary path (detected at install time)
+GITSAGE="{gitsage_bin}"
+
+if [ ! -x "$GITSAGE" ]; then
+    exit 0
+fi
+
+# Generate commit message (mode=print outputs the best candidate to stdout)
+GENERATED=$("$GITSAGE" commit --mode print 2>/dev/null)
+
+if [ $? -eq 0 ] && [ -n "$GENERATED" ]; then
+    # Write generated message to the file git is waiting for
+    printf '%s\\n' "$GENERATED" > "$COMMIT_MSG_FILE"
+fi
 """
     hook_path = hooks_dir / "prepare-commit-msg"
     if hook_path.exists():
-        overwrite = typer.confirm("prepare-commit-msg hook already exists. Overwrite?", default=False)
-        if not overwrite:
+        if not Confirm.ask("prepare-commit-msg hook already exists. Overwrite?", default=False):
             raise typer.Exit(0)
 
     hook_path.write_text(hook_content)
     hook_path.chmod(0o755)
-    rprint(f"[green]Hook installed at {hook_path}[/green]")
-    rprint("[dim]Edit the hook to enable auto-commit mode.[/dim]")
+    rprint(f"[green]✅ Hook installed: {hook_path}[/green]")
+    rprint()
+    rprint("[bold]使用方法：[/bold]")
+    rprint("  git add <文件>")
+    rprint("  git commit          ← gitsage 自动生成消息并在编辑器里预填")
+    rprint("  [dim]保存退出编辑器 → 提交完成[/dim]")
+    rprint()
+    rprint("[dim]提示：git commit -m '...' 时不会触发 AI 生成（已有消息则跳过）[/dim]")
 
 
 # ---------------------------------------------------------------------------
