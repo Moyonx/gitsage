@@ -76,6 +76,18 @@ Output ONLY valid JSON matching this schema — no prose, no markdown fences:
 {schema}
 """
 
+CATCHUP_SYSTEM_PROMPT = """
+You are a developer workflow assistant summarizing recent repository changes.
+Given a list of commits over a time period, produce a clear summary of:
+- What significant work happened
+- Key highlights worth calling out
+- The overall theme or direction of changes
+
+Focus on user-facing or architecturally important changes.
+Skip pure chore/dependency/formatting commits unless significant.
+Output JSON matching CatchupOutput schema.
+"""
+
 # ---------------------------------------------------------------------------
 # Schema helper
 # ---------------------------------------------------------------------------
@@ -224,4 +236,33 @@ def build_explain_user_prompt(
 
 Based on the above, explain why this code exists and how it came to be written this way.
 Be specific, cite commit SHAs and PR/Issue numbers where relevant.
+"""
+
+
+def build_catchup_user_prompt(
+    commits: list,
+    period_description: str,
+    repo_name: str,
+    ctx_content: str = "",
+) -> str:
+    """Build the user-facing prompt for catchup summary generation."""
+    commit_lines = []
+    for c in commits:
+        msg = c.message if hasattr(c, "message") else c.get("message", "")
+        author = c.author if hasattr(c, "author") else c.get("author", "")
+        date = c.date.strftime("%Y-%m-%d") if hasattr(c, "date") and hasattr(c.date, "strftime") else str(getattr(c, "date", c.get("date", "")))[:10]
+        sha = c.short_sha if hasattr(c, "short_sha") else c.get("sha", "")[:7]
+        commit_lines.append(f"- [{sha}] {date} {author}: {msg[:120]}")
+
+    commits_text = "\n".join(commit_lines) if commit_lines else "(no commits)"
+    ctx_section = f"\nProject context:\n{ctx_content[:800]}" if ctx_content else ""
+
+    return f"""Repository: {repo_name}
+Period: {period_description}
+Total commits: {len(commits)}{ctx_section}
+
+Commits:
+{commits_text}
+
+Summarize what happened in this period. Focus on significant changes.
 """

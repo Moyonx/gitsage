@@ -494,6 +494,91 @@ def explain(
 
 
 # ---------------------------------------------------------------------------
+# catchup command
+# ---------------------------------------------------------------------------
+
+@app.command()
+def catchup(
+    days: int = typer.Option(0, "--days", "-d", help="Number of days to look back"),
+    since: str = typer.Option("", "--since", help="Since a tag (e.g. v1.0.0) or date (YYYY-MM-DD)"),
+) -> None:
+    """Summarize recent repository changes — what happened while you were away.
+
+    \b
+    Examples:
+      gitsage catchup             # interactive time range picker
+      gitsage catchup --days 7    # past week
+      gitsage catchup --days 1    # today only
+      gitsage catchup --since v1.2.0   # since a tag
+      gitsage catchup --since 2024-03-01  # since a date
+    """
+    _ensure_consent()
+    _ensure_llm_configured()
+
+    from .config import load_config
+    from .agent.catchup_agent import CatchupAgent
+
+    # Interactive time picker if no args given
+    if not days and not since:
+        from rich.prompt import Prompt
+        console.print()
+        console.print("[bold]查看最近多久的变更？[/bold]\n")
+        console.print("  [cyan][1][/cyan] 今天")
+        console.print("  [cyan][2][/cyan] 本周（7 天）← 推荐")
+        console.print("  [cyan][3][/cyan] 两周")
+        console.print("  [cyan][4][/cyan] 自定义天数\n")
+        choice = Prompt.ask("选择", choices=["1", "2", "3", "4"], default="2")
+        if choice == "1":
+            days = 1
+        elif choice == "2":
+            days = 7
+        elif choice == "3":
+            days = 14
+        else:
+            days = int(Prompt.ask("输入天数", default="7"))
+
+    cfg = load_config()
+
+    try:
+        with console.status("[bold green]Analyzing recent changes...[/bold green]"):
+            agent = CatchupAgent.from_config(cfg.llm)
+            # Parse --since as tag or date
+            since_tag = ""
+            since_date = ""
+            if since:
+                if since[0].isdigit() or since.startswith("20"):
+                    since_date = since
+                else:
+                    since_tag = since
+            output = agent.catchup(
+                days=days or 7,
+                since_tag=since_tag,
+                since_date=since_date,
+            )
+    except Exception as e:
+        from .agent.llm import LLMRateLimitError
+        if isinstance(e, LLMRateLimitError):
+            rprint(f"[yellow]Rate limit:[/yellow] {e}")
+        else:
+            rprint(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Render
+    from rich.markdown import Markdown
+    console.print()
+    console.print(Panel(
+        Markdown(output.summary),
+        title=f"[bold cyan]变更摘要[/bold cyan] · {output.period_description} · {output.commit_count} commits",
+        expand=False,
+    ))
+    if output.highlights:
+        console.print()
+        console.print("[bold]亮点：[/bold]")
+        for h in output.highlights:
+            console.print(f"  • {h}")
+
+
+# ---------------------------------------------------------------------------
 # config sub-commands
 # ---------------------------------------------------------------------------
 
@@ -852,6 +937,133 @@ def preferences(
             raise typer.Exit(0)
 
     run_preferences_survey(skip_banner=False)
+
+
+# ---------------------------------------------------------------------------
+# mcp commands
+# ---------------------------------------------------------------------------
+
+mcp_app = typer.Typer(help="MCP Server management.")
+app.add_typer(mcp_app, name="mcp")
+
+
+@mcp_app.command("serve")
+def mcp_serve() -> None:
+    """Start the gitsage MCP server (stdio transport).
+
+    Use this to connect gitsage to Claude Desktop, Cursor, or any MCP client.
+    Configure your MCP client to run: gitsage mcp serve
+    """
+    from .mcp import run_server, MCP_AVAILABLE
+    import asyncio
+
+    if not MCP_AVAILABLE:
+        rprint("[red]Error:[/red] mcp package not installed.")
+        rprint("Run: pip install mcp")
+        raise typer.Exit(1)
+
+    rprint("[dim]gitsage MCP server starting on stdio...[/dim]", err=True)
+    asyncio.run(run_server())
+
+
+@mcp_app.command("install")
+def mcp_install(
+    client: str = typer.Option("claude", "--client", "-c",
+                                help="MCP client: claude | cursor | generic"),
+) -> None:
+    """Register gitsage MCP server with an MCP client (e.g. Claude Desktop).
+
+    \b
+    Examples:
+      gitsage mcp install                  # Claude Desktop (default)
+      gitsage mcp install --client cursor  # Cursor IDE
+    """
+    import sys
+    import json as _json
+
+    gitsage_bin = Path(sys.executable).parent / "gitsage"
+    if not gitsage_bin.exists():
+        gitsage_bin = Path(sys.executable).parent / "gitsage.exe"
+
+    server_config = {
+        "command": str(gitsage_bin),
+        "args": ["mcp", "serve"],
+    }
+
+    if client == "claude":
+        # Claude Desktop config
+        config_path = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+        if not config_path.parent.exists():
+            # Try Linux path
+            config_path = Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
+
+        _update_json_config(config_path, "mcpServers", "gitsage", server_config)
+        rprint(f"[green]Registered with Claude Desktop[/green]")
+        rprint(f"   Config: {config_path}")
+        rprint()
+        rprint("[bold]Next steps:[/bold]")
+        rprint("  1. Restart Claude Desktop")
+        rprint("  2. You should see 'gitsage' in the MCP tools list")
+        rprint("  3. Ask Claude: 'What's in my staged diff?' or 'Show recent commits'")
+
+    elif client == "cursor":
+        config_path = Path.cwd() / ".cursor" / "mcp.json"
+        config_path.parent.mkdir(exist_ok=True)
+        _update_json_config(config_path, "mcpServers", "gitsage", server_config)
+        rprint(f"[green]Registered with Cursor[/green]")
+        rprint(f"   Config: {config_path}")
+
+    else:
+        # Generic: just print the config
+        rprint("[bold]MCP Server Configuration:[/bold]")
+        rprint(_json.dumps({"mcpServers": {"gitsage": server_config}}, indent=2))
+        rprint()
+        rprint("Add the above to your MCP client's configuration file.")
+
+
+def _update_json_config(path: Path, section: str, key: str, value: dict) -> None:
+    """Update a JSON config file, creating it if needed."""
+    import json as _json
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = {}
+    if path.exists():
+        try:
+            data = _json.loads(path.read_text())
+        except Exception:
+            data = {}
+    if section not in data:
+        data[section] = {}
+    data[section][key] = value
+    path.write_text(_json.dumps(data, indent=2))
+
+
+@mcp_app.command("status")
+def mcp_status() -> None:
+    """Check MCP server availability and show configuration."""
+    from .mcp import MCP_AVAILABLE
+    import sys
+
+    rprint(f"[bold]gitsage MCP Server[/bold]")
+    rprint(f"  mcp package: {'[green]installed[/green]' if MCP_AVAILABLE else '[red]not installed[/red]'}")
+
+    gitsage_bin = Path(sys.executable).parent / "gitsage"
+    rprint(f"  gitsage binary: {gitsage_bin}")
+
+    rprint()
+    rprint("[bold]To connect Claude Desktop:[/bold]")
+    rprint("  gitsage mcp install")
+    rprint()
+    rprint("[bold]Manual config (add to claude_desktop_config.json):[/bold]")
+    config = {
+        "mcpServers": {
+            "gitsage": {
+                "command": str(gitsage_bin),
+                "args": ["mcp", "serve"],
+            }
+        }
+    }
+    import json as _json
+    rprint(_json.dumps(config, indent=2))
 
 
 # ---------------------------------------------------------------------------
