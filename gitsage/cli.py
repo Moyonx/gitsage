@@ -237,6 +237,11 @@ def commit(
         candidate.message = override.apply_to_commit(candidate.message)
 
     # Dispatch by mode
+    if resolved_mode == CommitMode.hook:
+        # Output only the first candidate message, no formatting — for git hooks
+        print(output.candidates[0].message)
+        raise typer.Exit(0)
+
     if resolved_mode == CommitMode.print:
         for i, c in enumerate(output.candidates, 1):
             console.print(f"[bold][{i}][/bold] {c.message}")
@@ -907,8 +912,8 @@ if [ ! -x "$GITSAGE" ]; then
     exit 0
 fi
 
-# Generate commit message (mode=print outputs the best candidate to stdout)
-GENERATED=$("$GITSAGE" commit --mode print 2>/dev/null)
+# Generate commit message (mode=hook outputs only the best candidate, no formatting)
+GENERATED=$("$GITSAGE" commit --mode hook 2>/dev/null)
 
 if [ $? -eq 0 ] && [ -n "$GENERATED" ]; then
     # Write generated message to the file git is waiting for

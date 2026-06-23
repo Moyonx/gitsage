@@ -62,8 +62,9 @@ def _expand_config(obj: Any) -> Any:
 
 class CommitMode(str, Enum):
     interactive = "interactive"
-    print = "print"
-    execute = "execute"
+    print = "print"      # show all candidates with explanations (human-readable)
+    execute = "execute"  # silently commit first candidate
+    hook = "hook"        # output first candidate message only, no formatting (for git hooks)
 
 
 # ---------------------------------------------------------------------------
