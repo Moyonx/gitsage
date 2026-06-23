@@ -30,6 +30,10 @@ class LLMError(Exception):
     """Raised when the LLM call fails after all retries."""
 
 
+class LLMRateLimitError(Exception):
+    """Raised on HTTP 429 — separate from LLMError so retries don't trigger."""
+
+
 class LLMValidationError(LLMError):
     """Raised when the LLM response cannot be validated against the output model."""
 
@@ -175,14 +179,18 @@ class OpenAICompatibleClient(BaseLLMClient):
             text = response.choices[0].message.content or ""
             return _parse_json_response(text, output_model)
 
+        except _openai.RateLimitError as exc:
+            raise LLMRateLimitError(f"Rate limit exceeded: {exc}") from exc
         except _openai.APIStatusError as exc:
+            if exc.status_code == 429:
+                raise LLMRateLimitError(
+                    f"OpenAI-compatible API error {exc.status_code}: {exc.message}"
+                ) from exc
             raise LLMError(
                 f"OpenAI-compatible API error {exc.status_code}: {exc.message}"
             ) from exc
         except _openai.APIConnectionError as exc:
             raise LLMError(f"API connection error: {exc}") from exc
-        except _openai.RateLimitError as exc:
-            raise LLMError(f"Rate limit exceeded: {exc}") from exc
         except LLMValidationError:
             raise
         except Exception as exc:

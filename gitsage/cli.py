@@ -208,7 +208,12 @@ def commit(
                 output_model=CommitOutput,
             )
     except Exception as e:
-        rprint(f"\n[red]LLM error:[/red] {e}")
+        from .agent.llm import LLMRateLimitError
+        if isinstance(e, LLMRateLimitError):
+            rprint(f"\n[yellow]⚠️  Rate limit reached:[/yellow] {e}")
+            rprint("[dim]请稍等片刻后重试（通常等待 60 秒）[/dim]")
+        else:
+            rprint(f"\n[red]LLM error:[/red] {e}")
         rprint("\n[yellow]Graceful degradation:[/yellow] Here is your diff for manual review:")
         rprint(f"[dim]{ctx.git_state.staged_summary}[/dim]")
         rprint("\nTip: Add a [bold]CTX.md[/bold] to your repo to improve future suggestions.")

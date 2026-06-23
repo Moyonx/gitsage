@@ -147,8 +147,8 @@ def _find_ctx_md(start: Optional[Path] = None) -> Optional[Path]:
 # ---------------------------------------------------------------------------
 
 _RULES_SECTION_PATTERN = re.compile(
-    r"",
-    re.DOTALL | re.IGNORECASE,
+    r"##\s*(?:规则|rules)[^\n]*\n((?:(?!^##).)+)",
+    re.DOTALL | re.IGNORECASE | re.MULTILINE,
 )
 
 
