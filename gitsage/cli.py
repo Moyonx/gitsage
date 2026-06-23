@@ -195,6 +195,15 @@ def commit(
     hook_runner = HookRunner()
     hook_runner.run(HookEvent.PRE_COMMIT)
 
+    # Load user preferences and build personalised system prompt
+    from .preferences import load_preferences
+    prefs = load_preferences()
+    pref_hint = prefs.to_prompt_hint()
+    personalised_system = (
+        COMMIT_SYSTEM_PROMPT
+        + (f"\n\n## User Preferences\n{pref_hint}" if pref_hint else "")
+    )
+
     # Call LLM
     llm = create_llm_client(cfg.llm)
     gate = QualityGate.for_commit()
@@ -203,7 +212,7 @@ def commit(
     try:
         with console.status("[bold green]Generating commit message...[/bold green]"):
             output: CommitOutput = llm.complete(
-                system=COMMIT_SYSTEM_PROMPT,
+                system=personalised_system,
                 user=user_prompt,
                 output_model=CommitOutput,
             )
@@ -321,12 +330,20 @@ def standup(
     hook_runner = HookRunner()
     hook_runner.run(HookEvent.PRE_STANDUP)
 
+    from .preferences import load_preferences
+    prefs = load_preferences()
+    pref_hint = prefs.to_prompt_hint()
+    personalised_standup = (
+        STANDUP_SYSTEM_PROMPT
+        + (f"\n\n## User Preferences\n{pref_hint}" if pref_hint else "")
+    )
+
     llm = create_llm_client(cfg.llm)
 
     try:
         with console.status("[bold green]Generating standup...[/bold green]"):
             output: StandupOutput = llm.complete(
-                system=STANDUP_SYSTEM_PROMPT,
+                system=personalised_standup,
                 user=user_prompt,
                 output_model=StandupOutput,
             )
@@ -699,6 +716,50 @@ def setup() -> None:
     """
     from .wizard import run_setup_wizard
     run_setup_wizard(skip_banner=False)
+
+
+@app.command()
+def preferences(
+    reset: bool = typer.Option(False, "--reset", help="Clear all preferences and start over."),
+    show: bool = typer.Option(False, "--show", help="Show current preferences without editing."),
+) -> None:
+    """Set or view personal preferences (language, commit style, standup format…).
+
+    \b
+    Examples:
+      gitsage preferences          # Edit preferences interactively
+      gitsage preferences --show   # View current preferences
+      gitsage preferences --reset  # Clear and reconfigure
+    """
+    from .preferences import (
+        load_preferences, save_preferences,
+        run_preferences_survey, has_preferences,
+        _show_preferences_summary,
+    )
+
+    if reset:
+        if Confirm.ask("清除所有偏好设置并重新配置？", default=False):
+            prefs = run_preferences_survey(skip_banner=False)
+        else:
+            raise typer.Exit(0)
+        return
+
+    if show:
+        if has_preferences():
+            prefs = load_preferences()
+            _show_preferences_summary(prefs)
+        else:
+            rprint("[yellow]尚未设置偏好。运行 gitsage preferences 进行配置。[/yellow]")
+        return
+
+    # Default: run survey (respects skip if already set)
+    if has_preferences():
+        console.print()
+        rprint("[dim]当前已有偏好设置（用 --show 查看，--reset 重置）[/dim]")
+        if not Confirm.ask("重新配置偏好？", default=False):
+            raise typer.Exit(0)
+
+    run_preferences_survey(skip_banner=False)
 
 
 # ---------------------------------------------------------------------------

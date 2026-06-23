@@ -474,4 +474,13 @@ def run_setup_wizard(skip_banner: bool = False) -> bool:
     if Confirm.ask("现在测试连接？", default=True):
         _test_connection(params)
 
+    # Preferences survey — only prompt if not already set
+    from .preferences import has_preferences, run_preferences_survey
+    console.print()
+    if not has_preferences():
+        if Confirm.ask("设置个人偏好（语言、commit 风格等）？只需 1 分钟", default=True):
+            run_preferences_survey(skip_banner=True)
+    else:
+        rprint("[dim]提示：用 gitsage preferences 可修改个人偏好[/dim]")
+
     return True
