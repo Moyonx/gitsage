@@ -1,0 +1,69 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gitsage"
+version = "0.1.0"
+description = "Git-native AI developer workflow assistant — commit messages, standups, code archaeology"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "gitsage Contributors" }]
+keywords = ["git", "ai", "commit", "standup", "developer-tools", "llm", "mcp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Version Control :: Git",
+    "Topic :: Utilities",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic>=0.28.0",
+    "openai>=1.30.0",
+    "typer>=0.12.0",
+    "rich>=13.7.0",
+    "pydantic>=2.7.0",
+    "python-dotenv>=1.0.0",
+    "PyYAML>=6.0.1",
+    "GitPython>=3.1.40",
+    "httpx>=0.27.0",
+    "tenacity>=8.3.0",
+    "mcp>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.14.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.4.0",
+    "mypy>=1.10.0",
+    "types-PyYAML>=6.0.0",
+]
+
+[project.scripts]
+gitsage = "gitsage.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/gitsage/gitsage"
+Repository = "https://github.com/gitsage/gitsage"
+Issues = "https://github.com/gitsage/gitsage/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gitsage"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

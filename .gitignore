@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment — NEVER commit
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# gitsage runtime
+.gitsage_cache/
+CTX.local.md
+
+# Local memory (auto-generated)
+~/.gitsage/memory/
