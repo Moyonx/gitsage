@@ -966,7 +966,8 @@ def mcp_serve() -> None:
         rprint("Run: pip install mcp")
         raise typer.Exit(1)
 
-    rprint("[dim]gitsage MCP server starting on stdio...[/dim]", err=True)
+    # Print to stderr so the message doesn't interfere with JSON-RPC on stdout
+    Console(stderr=True).print("[dim]gitsage MCP server starting on stdio...[/dim]")
     asyncio.run(run_server())
 
 
