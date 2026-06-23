@@ -431,6 +431,69 @@ def pr(
 
 
 # ---------------------------------------------------------------------------
+# explain command
+# ---------------------------------------------------------------------------
+
+@app.command()
+def explain(
+    file_path: str = typer.Argument(..., help="File to explain (relative to repo root)"),
+    local: bool = typer.Option(False, "--local", help="Skip GitHub API, use local git history only"),
+) -> None:
+    """Explain why a file's code exists — traces git history to find the story behind the code.
+
+    \b
+    Examples:
+      gitsage explain src/payment/retry.py
+      gitsage explain auth/token.py --local   # no GitHub token needed
+    """
+    _ensure_consent()
+    _ensure_llm_configured()
+
+    from .config import load_config
+    from .agent.explain_agent import ExplainAgent
+    from rich.markdown import Markdown
+    import os
+
+    cfg = load_config()
+
+    github_token = "" if local else os.environ.get("GITHUB_TOKEN", "")
+
+    try:
+        with console.status(f"[bold green]Tracing history of {file_path}...[/bold green]"):
+            agent = ExplainAgent.from_config(cfg.llm, github_token=github_token)
+            output = agent.explain(file_path)
+    except FileNotFoundError as e:
+        rprint(f"[red]File not found:[/red] {e}")
+        raise typer.Exit(1)
+    except Exception as e:
+        from .agent.llm import LLMRateLimitError
+        if isinstance(e, LLMRateLimitError):
+            rprint(f"[yellow]Rate limit:[/yellow] {e}")
+        else:
+            rprint(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Display
+    confidence_colors = {"high": "green", "medium": "yellow", "low": "red"}
+    confidence_icons = {"high": "OK", "medium": "~", "low": "!"}
+    color = confidence_colors.get(output.confidence, "white")
+    icon = confidence_icons.get(output.confidence, "*")
+
+    console.print()
+    console.print(Panel(
+        Markdown(output.explanation),
+        title=f"[bold]{file_path}[/bold]  [{color}]{icon} {output.confidence} confidence[/{color}]",
+        expand=False,
+    ))
+
+    if output.sources:
+        console.print(f"[dim]Sources: {', '.join(output.sources)}[/dim]")
+
+    if output.local_only:
+        console.print("[dim]Configure GITHUB_TOKEN to include PR and Issue context[/dim]")
+
+
+# ---------------------------------------------------------------------------
 # config sub-commands
 # ---------------------------------------------------------------------------
 

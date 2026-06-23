@@ -183,3 +183,45 @@ def build_pr_user_prompt(
         parts.append(f"## Project context (CTX.md)\n{ctx_content}")
 
     return "\n\n".join(parts)
+
+
+def build_explain_user_prompt(
+    file_path: str,
+    file_content: str,
+    language: str,
+    commits: list,  # list[CommitDetail]
+    local_only: bool,
+) -> str:
+    """Build the user-facing prompt for code archaeology / explain generation."""
+    commit_sections = []
+    for c in commits:
+        section = f"Commit {c.short_sha} by {c.author} on {c.date.strftime('%Y-%m-%d')}:\n"
+        section += f"  Message: {c.message[:200]}\n"
+        if c.pr_number:
+            section += f"  PR #{c.pr_number}: {c.pr_title or '(no title)'}\n"
+            if c.pr_body:
+                section += f"  PR Description: {c.pr_body[:400]}\n"
+        for i, (title, body) in enumerate(zip(c.issue_titles, c.issue_bodies)):
+            section += f"  Issue #{c.issue_numbers[i]}: {title}\n"
+            if body:
+                section += f"    {body[:300]}\n"
+        commit_sections.append(section)
+
+    context_note = (
+        "(Note: No GitHub token configured — analysis based on local git history only.)"
+        if local_only else ""
+    )
+
+    return f"""File: {file_path} ({language})
+
+{context_note}
+
+=== File Content (excerpt) ===
+{file_content[:3000]}
+
+=== Git History for This File ===
+{chr(10).join(commit_sections)}
+
+Based on the above, explain why this code exists and how it came to be written this way.
+Be specific, cite commit SHAs and PR/Issue numbers where relevant.
+"""
