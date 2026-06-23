@@ -44,16 +44,42 @@ class UserPreferences(BaseModel):
     standup_audience: Literal["technical", "nontechnical"] = "technical"
     standup_format: Literal["bullets", "paragraph"] = "bullets"
 
+    @property
+    def language_preamble(self) -> str:
+        """Strong language instruction — must go at the TOP of the system prompt.
+
+        LLMs give higher weight to instructions at the beginning. Appending at
+        the end (as a style hint) is not reliable for overriding the model's
+        default language.
+        """
+        if self.language == "zh":
+            return (
+                "【强制语言要求】用户偏好中文输出。\n"
+                "在 JSON 输出中，所有 `message` 字段的描述部分必须使用中文（简体）。\n"
+                "类型前缀（feat/fix/chore 等）保持英文，冒号后的描述文字必须是中文。\n"
+                "正确示例：\n"
+                "  \"message\": \"feat(payment): 新增支付重试机制，支持指数退避\"\n"
+                "  \"message\": \"fix: 修复用户登录超时的问题\"\n"
+                "  \"message\": \"chore: 更新依赖库版本\"\n"
+                "错误示例（禁止）：\n"
+                "  \"message\": \"feat: add payment retry logic\"  ← 描述部分必须是中文\n"
+                "所有 `reason` 字段的解释文字也必须是中文。\n\n"
+            )
+        if self.language == "en":
+            return (
+                "LANGUAGE REQUIREMENT: You MUST write ALL generated text "
+                "in English only. Do NOT use any other language.\n"
+            )
+        return ""  # auto → no constraint
+
     def to_prompt_hint(self) -> str:
-        """Return a compact hint string to inject into LLM prompts."""
+        """Return style hints to inject after the main system prompt.
+
+        Language is handled separately via language_preamble (placed at top).
+        """
         lines: list[str] = []
 
-        # Language
-        if self.language == "zh":
-            lines.append("Output language: Chinese (中文). Always respond in Chinese.")
-        elif self.language == "en":
-            lines.append("Output language: English. Always respond in English.")
-        # auto → don't constrain
+        # Language note omitted here — handled by language_preamble at prompt top
 
         # Commit style
         emoji_hint = "Include a relevant emoji prefix (e.g. ✨ feat:, 🐛 fix:)." if self.commit_emoji \

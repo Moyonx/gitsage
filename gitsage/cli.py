@@ -197,12 +197,15 @@ def commit(
     hook_runner.run(HookEvent.PRE_COMMIT)
 
     # Load user preferences and build personalised system prompt
+    # Language preamble goes FIRST so the model treats it as a hard requirement.
+    # Style hints go after the main prompt (lower priority, advisory).
     from .preferences import load_preferences
     prefs = load_preferences()
     pref_hint = prefs.to_prompt_hint()
     personalised_system = (
-        COMMIT_SYSTEM_PROMPT
-        + (f"\n\n## User Preferences\n{pref_hint}" if pref_hint else "")
+        prefs.language_preamble          # ← strong language constraint at top
+        + COMMIT_SYSTEM_PROMPT
+        + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
     )
 
     # Call LLM
@@ -340,8 +343,9 @@ def standup(
     prefs = load_preferences()
     pref_hint = prefs.to_prompt_hint()
     personalised_standup = (
-        STANDUP_SYSTEM_PROMPT
-        + (f"\n\n## User Preferences\n{pref_hint}" if pref_hint else "")
+        prefs.language_preamble          # ← language constraint at top
+        + STANDUP_SYSTEM_PROMPT
+        + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
     )
 
     llm = create_llm_client(cfg.llm)
@@ -733,11 +737,11 @@ def model_list() -> None:
     suggest_table.add_column("说明", style="dim")
 
     SUGGESTIONS = [
-        ("openai-compatible", "gpt-5.4 / gpt-5.5", "美团内网 AIGC 接口"),
-        ("openai-compatible", "deepseek-v4-flash", "DeepSeek 官方接口，需配 base_url"),
-        ("openai", "gpt-4o / gpt-4o-mini", "OpenAI 官方"),
-        ("anthropic", "claude-sonnet-4-6", "Anthropic，需单独安装 anthropic 包"),
-        ("ollama", "qwen2.5:14b / llama3", "本地模型，需先安装 Ollama"),
+        ("openai-compatible", "deepseek-v4-flash", "DeepSeek — https://platform.deepseek.com"),
+        ("openai-compatible", "any-model-name", "任意 OpenAI-compatible 接口：配置 base_url 即可"),
+        ("openai", "gpt-4o / gpt-4o-mini", "OpenAI — https://platform.openai.com"),
+        ("anthropic", "claude-sonnet-4-6", "Anthropic — 需另装 anthropic 包"),
+        ("ollama", "qwen2.5:14b / llama3", "本地模型，完全离线 — https://ollama.com"),
     ]
 
     for provider, model, note in SUGGESTIONS:

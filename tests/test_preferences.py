@@ -23,14 +23,26 @@ class TestUserPreferences:
         assert p.standup_format == "bullets"
 
     def test_to_prompt_hint_zh(self):
+        # Language is now handled by language_preamble (placed at prompt top)
         p = UserPreferences(language="zh")
-        hint = p.to_prompt_hint()
-        assert "Chinese" in hint or "中文" in hint
+        assert "Chinese" in p.language_preamble or "中文" in p.language_preamble
+
+    def test_language_preamble_zh_is_strong(self):
+        p = UserPreferences(language="zh")
+        preamble = p.language_preamble
+        # Should contain a strong directive and language mention
+        has_directive = any(w in preamble for w in ["MUST", "REQUIREMENT", "强制", "必须", "禁止"])
+        assert has_directive, "preamble should contain a strong language directive"
+        assert "中文" in preamble or "Chinese" in preamble
 
     def test_to_prompt_hint_en(self):
+        # Language is now handled by language_preamble
         p = UserPreferences(language="en")
-        hint = p.to_prompt_hint()
-        assert "English" in hint
+        assert "English" in p.language_preamble
+
+    def test_language_preamble_auto_is_empty(self):
+        p = UserPreferences(language="auto")
+        assert p.language_preamble == ""
 
     def test_to_prompt_hint_auto_no_language_constraint(self):
         p = UserPreferences(language="auto")
