@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.panel import Panel
+from rich.prompt import Confirm
 from rich.table import Table
 from rich import print as rprint
 
@@ -545,31 +546,54 @@ KNOWN_MODELS = {
 
 @model_app.command("list")
 def model_list() -> None:
-    """List available models with their status."""
-    from .config import load_config, PROVIDER_ENV_VARS
-    import os
+    """Show the currently configured model and common model suggestions."""
+    from .config import load_config
 
     cfg = load_config()
 
-    table = Table(title="Available Models", show_header=True, header_style="bold cyan")
-    table.add_column("Provider", style="bold")
-    table.add_column("Model")
-    table.add_column("API Key")
-    table.add_column("Active", justify="center")
+    # ── Active model (from config) ────────────────────────────────────────────
+    console.print()
+    console.print("[bold cyan]当前配置的模型[/bold cyan]")
 
-    for provider, models in KNOWN_MODELS.items():
-        env_var = PROVIDER_ENV_VARS.get(provider, "")
-        has_key = bool(os.environ.get(env_var, "")) if env_var else True
-        key_status = "[green]set[/green]" if has_key else "[red]missing[/red]"
+    active_table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    active_table.add_column("Provider")
+    active_table.add_column("Model")
+    active_table.add_column("Base URL")
+    active_table.add_column("API Key")
 
-        for i, model_name in enumerate(models):
-            is_active = (provider == cfg.llm.provider and model_name == cfg.llm.model)
-            active_mark = "[green]*[/green]" if is_active else ""
-            p_display = provider if i == 0 else ""
-            k_display = key_status if i == 0 else ""
-            table.add_row(p_display, model_name, k_display, active_mark)
+    key_status = "[green]✅ 已配置[/green]" if cfg.llm.api_key else "[red]❌ 未配置[/red]"
+    active_table.add_row(
+        f"[bold green]{cfg.llm.provider}[/bold green]",
+        f"[bold green]{cfg.llm.model}[/bold green]",
+        cfg.llm.base_url or "[dim]（SDK 自动处理）[/dim]",
+        key_status,
+    )
+    console.print(active_table)
 
-    console.print(table)
+    # ── Common model suggestions ──────────────────────────────────────────────
+    console.print()
+    console.print("[dim]常用模型参考（用 gitsage model set 切换）[/dim]")
+
+    suggest_table = Table(show_header=True, header_style="dim", box=None, padding=(0, 2))
+    suggest_table.add_column("Provider", style="dim")
+    suggest_table.add_column("Model", style="dim")
+    suggest_table.add_column("说明", style="dim")
+
+    SUGGESTIONS = [
+        ("openai-compatible", "gpt-5.4 / gpt-5.5", "美团内网 AIGC 接口"),
+        ("openai-compatible", "deepseek-v4-flash", "DeepSeek 官方接口，需配 base_url"),
+        ("openai", "gpt-4o / gpt-4o-mini", "OpenAI 官方"),
+        ("anthropic", "claude-sonnet-4-6", "Anthropic，需单独安装 anthropic 包"),
+        ("ollama", "qwen2.5:14b / llama3", "本地模型，需先安装 Ollama"),
+    ]
+
+    for provider, model, note in SUGGESTIONS:
+        suggest_table.add_row(provider, model, note)
+
+    console.print(suggest_table)
+    console.print()
+    console.print("[dim]切换示例: gitsage model set gpt-5.5[/dim]")
+    console.print("[dim]查看配置: gitsage config show[/dim]")
 
 
 @model_app.command("set")
