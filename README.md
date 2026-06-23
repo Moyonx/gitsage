@@ -5,7 +5,7 @@
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-136%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-163%20passing-brightgreen.svg)](#)
 
 ---
 
@@ -233,6 +233,68 @@ gitsage skill list          # see installed skills
 ```
 
 Example: a `jira-standup` skill that formats standups with JIRA ticket references, stored in `.gitsage/skills/jira-standup/SKILL.md`. The skill's description is always in context; the full content loads only when relevant.
+
+---
+
+## MCP Server — Claude Code / CatPaw / Cursor Integration
+
+gitsage exposes your local git state as an MCP server. Once registered, any MCP-compatible AI editor can query your repository directly — current branch, staged diff, recent commits, file history — without leaving the editor.
+
+### Setup
+
+```bash
+# 1. Install gitsage
+pip install git+https://github.com/Moyonx/gitsage.git
+
+# 2. Register with Claude Code or CatPaw
+claude mcp add gitsage -- gitsage mcp serve
+
+# 3. Open a new session — tools are ready
+```
+
+For Cursor, add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "gitsage": {
+      "command": "gitsage",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+Or use the built-in install command:
+
+```bash
+gitsage mcp install            # Claude Desktop
+gitsage mcp install --client cursor   # Cursor
+gitsage mcp status             # show config snippet for any client
+```
+
+### Available Tools
+
+| Tool | What it returns |
+|------|----------------|
+| `get_git_status` | Branch name, staged files, clean/dirty state |
+| `get_staged_diff` | Full diff of staged changes |
+| `get_recent_commits` | Recent N commits (sha, author, date, message) |
+| `get_branch_info` | Current branch + last commit |
+| `get_file_history` | Git log for a specific file |
+
+### Usage in Claude Code / CatPaw
+
+Once registered, just ask naturally in a new session:
+
+```
+"What's in my staged diff?"
+"Show me the last 5 commits"
+"What branch am I on?"
+"What changed in gitsage/cli.py recently?"
+```
+
+All data is read **locally** — nothing leaves your machine.
 
 ---
 
