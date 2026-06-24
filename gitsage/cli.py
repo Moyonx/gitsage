@@ -808,7 +808,7 @@ def config_init() -> None:
         console.print(Syntax(c, "markdown", theme="github-dark", word_wrap=True))
         console.print()
         console.print(
-            "[dim]操作：[y/回车] 保存  [e] 在编辑器打开  [q] 放弃  "
+            "[dim]操作：\\[y/回车] 保存  \\[e] 在编辑器打开  \\[q] 放弃  "
             "或直接输入修改指令（自然语言）[/dim]"
         )
 
