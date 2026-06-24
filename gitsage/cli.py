@@ -744,23 +744,32 @@ def config_init() -> None:
         rprint(f"[dim]已设置生成语言：{lang_label}[/dim]")
         console.print()
 
-    # ── Optional: adjust detected info before generating ─────────────────
-    console.print("[dim]检测结果是否需要调整？直接回车跳过，或输入要调整的内容：[/dim]")
+    # ── Optional: adjust detected info before generating (multi-round) ───
+    console.print("[dim]检测结果是否需要调整？可多条，每行一条，空行结束开始生成：[/dim]")
     console.print(
-        "[dim]例：「语言改成英文」「不要 emoji」「加上模块：payment, order」[/dim]"
+        "[dim]例：「加上 emoji」「不要 scope」「加上模块：payment, order」「q 取消」[/dim]"
     )
-    adj = input("调整（回车跳过）> ").strip()
-    if adj:
-        # Apply natural-language adjustment to patterns description
-        # We encode the user's adjustment into the generation prompt
-        patterns = dict(patterns)
-        patterns["_user_adjustment"] = adj
-        rprint(f"[green]✅ 已记录调整：{adj}[/green]")
-    console.print()
+    adjustments: list[str] = []
+    while True:
+        adj = input(
+            f"调整 {len(adjustments) + 1}（空行开始生成）> "
+            if adjustments
+            else "调整（空行跳过）> "
+        ).strip()
+        if not adj:
+            break
+        if adj.lower() in ("q", "quit", "exit", "取消"):
+            rprint("[dim]已取消。[/dim]")
+            raise typer.Exit(0)
+        adjustments.append(adj)
+        rprint(f"[green]✅ 已记录：{adj}[/green]")
 
-    if not Confirm.ask("开始生成 CTX.md？", default=True):
-        rprint("[dim]已取消。[/dim]")
-        raise typer.Exit(0)
+    if adjustments:
+        patterns = dict(patterns)
+        patterns["_user_adjustment"] = "\n".join(f"- {a}" for a in adjustments)
+        console.print()
+    else:
+        console.print()
 
     # ── Phase 3: LLM generation ───────────────────────────────────────────
     try:
