@@ -304,11 +304,21 @@ def build_config_init_prompt(
     total = patterns.get("total_analyzed", 0)
 
     sample_block = "\n".join(f"  - {m}" for m in sample_msgs) if sample_msgs else "  (none)"
+    user_adjustment = patterns.get("_user_adjustment", "")
+    lang_instruction = (
+        "Chinese (中文)" if lang == "zh"
+        else "English" if lang == "en"
+        else "Chinese (中文)"   # default mixed → Chinese
+    )
+    adjustment_section = (
+        f"\nUser adjustments to apply:\n{user_adjustment}\n"
+        if user_adjustment else ""
+    )
 
     return f"""Generate a CTX.md file for repository: {repo_name}
 
 Analysis of the last {total} commits:
-- Language: {lang} ({"Chinese/中文" if lang == "zh" else "English" if lang == "en" else "mixed"})
+- Output language: {lang_instruction} — write ALL CTX.md content in this language
 - Uses emoji: {"yes" if uses_emoji else "no"}
 - Uses Conventional Commits type prefix (feat/fix/etc): {"yes" if uses_type else "no"}
 - Uses scope (feat(module): ...): {"yes" if uses_scope else "no"}
@@ -318,13 +328,13 @@ Analysis of the last {total} commits:
 
 Sample commit messages:
 {sample_block}
-
+{adjustment_section}
 Generate a CTX.md that:
-1. Has a short ## Project Background section (leave a placeholder note for the user to fill in project description)
-2. Has a ## Commit Rules section reflecting the DETECTED style above (with a concrete example)
-3. Has a ## Standup Format section with sensible defaults
-4. Has a ## Rules section with always/never rules derived from the patterns
-5. Uses the same language as the detected commit language
+1. ## Project Background — placeholder for user to fill in
+2. ## Commit Rules — reflect the detected style, include a concrete example
+3. ## Standup Format — sensible defaults for technical team
+4. ## Rules — always/never rules from patterns
+5. Write ALL text in {lang_instruction}
 
 Output ONLY the CTX.md content.
 """

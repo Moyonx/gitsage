@@ -707,8 +707,8 @@ def config_init() -> None:
     if not patterns:
         rprint("[yellow]没有找到提交记录，将生成通用模板。[/yellow]")
 
-    # ── Phase 2: show detected patterns + confirmation ────────────────────
-    lang_label = {"zh": "中文", "en": "English", "mixed": "混合"}.get(
+    # ── Phase 2: show detected patterns, allow adjustments, then confirm ───
+    lang_label = {"zh": "中文", "en": "English", "mixed": "混合（中英混用）"}.get(
         patterns.get("language", "en"), "Unknown"
     )
     console.print()
@@ -727,7 +727,38 @@ def config_init() -> None:
         console.print(f"  commit 示例 : {patterns['sample_msgs'][0]}")
     console.print()
 
-    if not Confirm.ask("基于以上信息生成 CTX.md？", default=True):
+    # ── Language resolution: ask when mixed or ambiguous ──────────────────
+    if patterns.get("language") in ("mixed", None, ""):
+        console.print(
+            "[yellow]检测到中英混用，生成 CTX.md 用哪种语言？[/yellow]"
+        )
+        lang_choice = Prompt.ask(
+            "语言",
+            choices=["zh", "en"],
+            default="zh",
+            show_choices=True,
+        )
+        patterns = dict(patterns)  # make mutable copy
+        patterns["language"] = lang_choice
+        lang_label = "中文" if lang_choice == "zh" else "English"
+        rprint(f"[dim]已设置生成语言：{lang_label}[/dim]")
+        console.print()
+
+    # ── Optional: adjust detected info before generating ─────────────────
+    console.print("[dim]检测结果是否需要调整？直接回车跳过，或输入要调整的内容：[/dim]")
+    console.print(
+        "[dim]例：「语言改成英文」「不要 emoji」「加上模块：payment, order」[/dim]"
+    )
+    adj = input("调整（回车跳过）> ").strip()
+    if adj:
+        # Apply natural-language adjustment to patterns description
+        # We encode the user's adjustment into the generation prompt
+        patterns = dict(patterns)
+        patterns["_user_adjustment"] = adj
+        rprint(f"[green]✅ 已记录调整：{adj}[/green]")
+    console.print()
+
+    if not Confirm.ask("开始生成 CTX.md？", default=True):
         rprint("[dim]已取消。[/dim]")
         raise typer.Exit(0)
 
