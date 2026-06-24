@@ -342,7 +342,8 @@ Rules:
 - Make ONLY the requested change. Leave everything else exactly as-is.
 - Keep the same structure and section headers unless asked to change them.
 - Write in the same language as the existing CTX.md.
-- Output ONLY the CTX.md content — no explanation, no markdown fences.
+- Return JSON in the format: {"content": "<complete updated CTX.md text>", "items": []}
+- The "content" field must contain the full updated CTX.md as a string.
 """
 
 
@@ -355,5 +356,6 @@ def build_ctx_modify_prompt(current_content: str, instruction: str) -> str:
 
 User's modification request: {instruction}
 
-Apply this change and return the complete updated CTX.md.
+Apply ONLY the requested change, keep everything else the same.
+Return JSON: {{"content": "<complete updated CTX.md here>", "items": []}}
 """
