@@ -129,7 +129,7 @@ gitsage explain <file> --local    # skip GitHub API, local git history only
 gitsage setup                     # interactive LLM setup wizard
 gitsage preferences               # set language, emoji, commit style…
 gitsage preferences --show        # view current preferences
-gitsage config init               # generate CTX.md template for this repo
+gitsage config init               # analyse git history → AI-draft CTX.md → interactive review loop
 gitsage config show               # show resolved configuration
 ```
 
@@ -149,6 +149,9 @@ gitsage install-hooks             # install prepare-commit-msg git hook
 gitsage memory show               # view learned preferences for this repo
 gitsage memory clear              # reset memory for this repo
 gitsage skill list                # list available skills
+gitsage skill show <name>         # display a skill's full content
+gitsage skill add [name]          # create a new skill interactively
+gitsage skill edit <name>         # open a skill in $EDITOR
 ```
 
 ---
@@ -229,7 +232,10 @@ feat(payment): add exponential backoff retry mechanism [PAY-234]
 Skills are markdown files that give gitsage domain-specific reasoning frameworks. They live in `.gitsage/skills/<name>/SKILL.md`.
 
 ```bash
-gitsage skill list          # see installed skills
+gitsage skill list               # see installed skills (name, trigger, source)
+gitsage skill show <name>        # display full SKILL.md with syntax highlight
+gitsage skill add [name]         # interactive wizard → creates .gitsage/skills/<name>/SKILL.md
+gitsage skill edit <name>        # open in $EDITOR
 ```
 
 Example: a `jira-standup` skill that formats standups with JIRA ticket references, stored in `.gitsage/skills/jira-standup/SKILL.md`. The skill's description is always in context; the full content loads only when relevant.
@@ -282,6 +288,8 @@ gitsage mcp status             # show config snippet for any client
 | `get_recent_commits` | Recent N commits (sha, author, date, message) |
 | `get_branch_info` | Current branch + last commit |
 | `get_file_history` | Git log for a specific file |
+| `generate_commit_message` | AI-generated commit candidates (respects CTX.md + memory + preferences) |
+| `generate_standup` | AI-generated standup from today's commits (respects CTX.md + preferences) |
 
 ### Usage in Claude Code / CatPaw
 
@@ -292,9 +300,13 @@ Once registered, just ask naturally in a new session:
 "Show me the last 5 commits"
 "What branch am I on?"
 "What changed in gitsage/cli.py recently?"
+"Write me a commit message for the staged changes"
+"Generate my standup for today"
 ```
 
-All data is read **locally** — nothing leaves your machine.
+`generate_commit_message` and `generate_standup` run the full gitsage pipeline — CTX.md rules, memory, quality gate, and your style preferences — all triggered directly from your AI editor.
+
+All data is processed **locally** — your diff and commits never leave your machine.
 
 ---
 

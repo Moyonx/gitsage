@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gitsage"
-version = "0.1.0"
+version = "0.2.0"
 description = "Git-native AI developer workflow assistant — commit messages, standups, code archaeology"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -50,9 +50,9 @@ dev = [
 gitsage = "gitsage.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/gitsage/gitsage"
-Repository = "https://github.com/gitsage/gitsage"
-Issues = "https://github.com/gitsage/gitsage/issues"
+Homepage = "https://github.com/Moyonx/gitsage"
+Repository = "https://github.com/Moyonx/gitsage"
+Issues = "https://github.com/Moyonx/gitsage/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["gitsage"]
