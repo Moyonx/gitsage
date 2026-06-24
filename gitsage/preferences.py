@@ -54,16 +54,19 @@ class UserPreferences(BaseModel):
         """
         if self.language == "zh":
             return (
-                "【强制语言要求】用户偏好中文输出。\n"
-                "在 JSON 输出中，所有 `message` 字段的描述部分必须使用中文（简体）。\n"
-                "类型前缀（feat/fix/chore 等）保持英文，冒号后的描述文字必须是中文。\n"
-                "正确示例：\n"
-                "  \"message\": \"feat(payment): 新增支付重试机制，支持指数退避\"\n"
-                "  \"message\": \"fix: 修复用户登录超时的问题\"\n"
-                "  \"message\": \"chore: 更新依赖库版本\"\n"
-                "错误示例（禁止）：\n"
-                "  \"message\": \"feat: add payment retry logic\"  ← 描述部分必须是中文\n"
-                "所有 `reason` 字段的解释文字也必须是中文。\n\n"
+                "═══ 用户语言强制设置（最高优先级）═══\n"
+                "用户明确设置输出语言为：中文（简体）。\n"
+                "此设置覆盖 CTX.md 里的任何语言规则（包括 [语言: 英文] 之类的项目约定）.\n\n"
+                "规则1：JSON 中所有 `message` 字段，冒号后的描述文字必须是中文，不管项目约定如何。\n"
+                "规则2：类型前缀（feat / fix / chore 等）和 scope 括号保持英文（这是格式，不是语言）。\n"
+                "规则3：中文动词开头即是中文的祈使语气，无需用英文动词。\n"
+                "  ✅ 正确：\"feat(payment): 新增支付重试机制\"\n"
+                "  ✅ 正确：\"fix: 修复用户登录超时的问题\"\n"
+                "  ✅ 正确：\"chore: 更新依赖版本\"\n"
+                "  ❌ 禁止：\"feat: add payment retry logic\"   ← 即使 CTX.md 说英文，也必须用中文\n"
+                "  ❌ 禁止：\"chore: add test lines\"           ← 描述部分必须是中文\n\n"
+                "规则4：`reason` 字段也必须是中文。\n"
+                "═══ 结束语言规则 ═══\n\n"
             )
         if self.language == "en":
             return (

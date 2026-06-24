@@ -121,6 +121,29 @@ def _extract_commit_type(message: str) -> str:
     return m.group(1).lower() if m else ""
 
 
+def _append_language_override(user_prompt: str, prefs: object) -> str:
+    """Append a language reminder at the END of the user prompt.
+
+    Placing the override at the END gives it the highest recency priority,
+    overriding any "语言: 英文" (language: English) found in CTX.md content
+    that was already embedded in the user prompt body.
+    """
+    lang = getattr(prefs, "language", "auto")
+    if lang == "zh":
+        return user_prompt + (
+            "\n\n⚠️ 用户语言设置（最高优先级，覆盖 CTX.md 语言规则）："
+            "所有 `message` 字段的描述必须用中文。"
+            "示例：chore: 添加测试行 / feat(cli): 新增功能 / fix: 修复问题。"
+            "禁止英文描述，即使 CTX.md 设定了语言为英文。"
+        )
+    if lang == "en":
+        return user_prompt + (
+            "\n\n⚠️ User language override (highest priority, overrides CTX.md):"
+            " ALL message descriptions MUST be in English only."
+        )
+    return user_prompt  # auto → no override
+
+
 def _fire_memory_update(
     repo_name: str,
     message: str,
@@ -232,6 +255,8 @@ def commit(
         + COMMIT_SYSTEM_PROMPT
         + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
     )
+    # Override at user-prompt level too — beats any CTX.md language rule
+    user_prompt = _append_language_override(user_prompt, prefs)
 
     # Call LLM
     llm = create_llm_client(cfg.llm)
@@ -388,6 +413,7 @@ def standup(
         + STANDUP_SYSTEM_PROMPT
         + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
     )
+    user_prompt = _append_language_override(user_prompt, prefs)
 
     llm = create_llm_client(cfg.llm)
 
@@ -462,6 +488,7 @@ def pr(
         + PR_SYSTEM_PROMPT
         + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
     )
+    user_prompt = _append_language_override(user_prompt, prefs)
 
     llm = create_llm_client(cfg.llm)
 
