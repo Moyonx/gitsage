@@ -751,11 +751,12 @@ def config_init() -> None:
     )
     adjustments: list[str] = []
     while True:
-        adj = input(
-            f"调整 {len(adjustments) + 1}（空行开始生成）> "
+        prompt_label = (
+            f"[dim]调整 {len(adjustments) + 1}（空行开始生成）>[/dim] "
             if adjustments
-            else "调整（空行跳过）> "
-        ).strip()
+            else "[dim]调整（空行跳过）>[/dim] "
+        )
+        adj = console.input(prompt_label).strip()
         if not adj:
             break
         if adj.lower() in ("q", "quit", "exit", "取消"):
@@ -814,7 +815,7 @@ def config_init() -> None:
     _show_content(content)
 
     while True:
-        raw = input("> ").strip()
+        raw = console.input("[dim]>[/dim] ").strip()
 
         # ── [y / Enter] save ──────────────────────────────────────────────
         if raw.lower() in ("y", "yes", ""):
