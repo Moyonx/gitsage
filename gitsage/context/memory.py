@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
+import threading
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..agent.llm import BaseLLMClient
+
+logger = logging.getLogger(__name__)
 
 MEMORY_DIR = Path.home() / ".gitsage" / "memory"
 SUMMARIZE_EVERY = 20   # trigger LLM summarization every N raw observations
@@ -124,7 +132,95 @@ class MemoryManager:
 
         self._path.write_text(new_content, encoding="utf-8")
 
+    def summarize_with_llm(self, llm_client: "BaseLLMClient") -> None:
+        """Call the LLM to condense raw observations into a structured summary.
+
+        Replaces the Summary section and clears raw observations.
+        Silently swallows errors so the caller is never blocked.
+        """
+        observations = self.get_raw_observations()
+        if not observations:
+            return
+
+        from ..agent.models import StandupOutput  # reuse simple model for summary
+
+        obs_text = "\n".join(f"- {o}" for o in observations)
+        prompt = (
+            f"You are summarising developer activity for repository '{self._repo_name}'.\n\n"
+            f"Raw observations (recent commits and actions):\n{obs_text}\n\n"
+            "Write a concise structured summary covering:\n"
+            "1. The developer's preferred commit style (emoji, language, format)\n"
+            "2. Which modules they work on most\n"
+            "3. Any recurring patterns or preferences\n"
+            "4. Current work context (what they seem to be working on now)\n\n"
+            "Keep it under 200 words. This summary will be used to personalise "
+            "future AI-generated commit messages and standups."
+        )
+
+        try:
+            # We use StandupOutput as a simple container; only 'content' is used
+            result = llm_client.complete(
+                system="You summarise developer activity concisely. Output JSON only.",
+                user=prompt,
+                output_model=StandupOutput,
+            )
+            self.update_summary(result.content)
+            logger.debug("Memory summarised for %s", self._repo_name)
+        except Exception as e:
+            logger.debug("Memory summarisation failed (non-fatal): %s", e)
+
+    def record_commit(
+        self,
+        message: str,
+        category: str = "",
+        branch: str = "",
+        llm_client: "BaseLLMClient | None" = None,
+    ) -> None:
+        """Record a successful commit and optionally trigger background summarisation.
+
+        Designed to be called from a background thread so it never blocks
+        the main CLI flow.
+        """
+        scope_info = f" branch={branch}" if branch else ""
+        cat_info = f" type={category}" if category else ""
+        observation = f'"{message}"{cat_info}{scope_info}'
+        self.append_observation("commit", observation)
+
+        if llm_client and self.should_summarize():
+            self.summarize_with_llm(llm_client)
+
     def clear(self) -> None:
         """Delete the memory file entirely."""
         if self._path.is_file():
             self._path.unlink()
+
+
+# ---------------------------------------------------------------------------
+# Background worker
+# ---------------------------------------------------------------------------
+
+def update_memory_async(
+    repo_name: str,
+    message: str,
+    category: str = "",
+    branch: str = "",
+    llm_client: "BaseLLMClient | None" = None,
+) -> None:
+    """Fire-and-forget: record a commit in memory on a daemon thread.
+
+    Errors are swallowed — memory is best-effort and must never block the CLI.
+    """
+    def _work() -> None:
+        try:
+            mem = MemoryManager(repo_name)
+            mem.record_commit(
+                message=message,
+                category=category,
+                branch=branch,
+                llm_client=llm_client,
+            )
+        except Exception as e:
+            logger.debug("Memory update failed (non-fatal): %s", e)
+
+    t = threading.Thread(target=_work, daemon=True, name="gitsage-memory")
+    t.start()

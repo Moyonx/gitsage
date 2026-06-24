@@ -8,7 +8,7 @@ from typing import Optional
 import typer
 from rich.console import Console
 from rich.panel import Panel
-from rich.prompt import Confirm
+from rich.prompt import Confirm, Prompt
 from rich.table import Table
 from rich import print as rprint
 
@@ -112,6 +112,31 @@ def _ensure_llm_configured() -> None:
 def _estimate_tokens(text: str) -> int:
     """Rough token estimate: ~4 chars per token."""
     return max(1, len(text) // 4)
+
+
+def _extract_commit_type(message: str) -> str:
+    """Extract Conventional Commits type prefix from a message (e.g. 'feat')."""
+    import re
+    m = re.match(r"^(feat|fix|chore|refactor|docs|test|style|perf|ci|build|revert)[\(:]", message, re.IGNORECASE)
+    return m.group(1).lower() if m else ""
+
+
+def _fire_memory_update(
+    repo_name: str,
+    message: str,
+    category: str,
+    branch: str,
+    llm: object,
+) -> None:
+    """Fire-and-forget memory update in a background daemon thread."""
+    from .context.memory import update_memory_async
+    update_memory_async(
+        repo_name=repo_name,
+        message=message,
+        category=category,
+        branch=branch,
+        llm_client=llm,  # type: ignore[arg-type]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +281,14 @@ def commit(
         rprint(f"[bold]Committing:[/bold] {message}")
         success = execute_git_commit(message)
         hook_runner.run(HookEvent.POST_COMMIT)
+        if success:
+            _fire_memory_update(
+                repo_name=ctx.git_state.repo_name,
+                message=message,
+                category=_extract_commit_type(message),
+                branch=ctx.git_state.branch_name,
+                llm=llm,
+            )
         raise typer.Exit(0 if success else 1)
 
     # Interactive (default)
@@ -266,6 +299,14 @@ def commit(
 
     success = execute_git_commit(chosen)
     hook_runner.run(HookEvent.POST_COMMIT)
+    if success:
+        _fire_memory_update(
+            repo_name=ctx.git_state.repo_name,
+            message=chosen,
+            category=_extract_commit_type(chosen),
+            branch=ctx.git_state.branch_name,
+            llm=llm,
+        )
     raise typer.Exit(0 if success else 1)
 
 
@@ -406,11 +447,20 @@ def pr(
     commit_msgs = [c.message for c in ctx.git_state.recent_commits]
 
     user_prompt = build_pr_user_prompt(
-        diff=ctx.git_state.staged_diff,
+        diff=ctx.branch_diff,           # full branch diff, not just staged
         commit_messages=commit_msgs,
         base_branch=base_branch,
         head_branch=ctx.git_state.branch_name,
         ctx_content=ctx.ctx.raw,
+    )
+
+    from .preferences import load_preferences
+    prefs = load_preferences()
+    pref_hint = prefs.to_prompt_hint()
+    personalised_pr = (
+        prefs.language_preamble
+        + PR_SYSTEM_PROMPT
+        + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
     )
 
     llm = create_llm_client(cfg.llm)
@@ -418,7 +468,7 @@ def pr(
     try:
         with console.status("[bold green]Generating PR description...[/bold green]"):
             output: PROutput = llm.complete(
-                system=PR_SYSTEM_PROMPT,
+                system=personalised_pr,
                 user=user_prompt,
                 output_model=PROutput,
             )
@@ -455,17 +505,19 @@ def explain(
 
     from .config import load_config
     from .agent.explain_agent import ExplainAgent
+    from .preferences import load_preferences
     from rich.markdown import Markdown
     import os
 
     cfg = load_config()
+    prefs = load_preferences()
 
     github_token = "" if local else os.environ.get("GITHUB_TOKEN", "")
 
     try:
         with console.status(f"[bold green]Tracing history of {file_path}...[/bold green]"):
             agent = ExplainAgent.from_config(cfg.llm, github_token=github_token)
-            output = agent.explain(file_path)
+            output = agent.explain(file_path, language_preamble=prefs.language_preamble)
     except FileNotFoundError as e:
         rprint(f"[red]File not found:[/red] {e}")
         raise typer.Exit(1)
@@ -542,6 +594,8 @@ def catchup(
             days = int(Prompt.ask("输入天数", default="7"))
 
     cfg = load_config()
+    from .preferences import load_preferences
+    prefs = load_preferences()
 
     try:
         with console.status("[bold green]Analyzing recent changes...[/bold green]"):
@@ -558,6 +612,7 @@ def catchup(
                 days=days or 7,
                 since_tag=since_tag,
                 since_date=since_date,
+                language_preamble=prefs.language_preamble,
             )
     except Exception as e:
         from .agent.llm import LLMRateLimitError
@@ -588,25 +643,123 @@ def catchup(
 
 @config_app.command("init")
 def config_init() -> None:
-    """Analyze git history and generate a CTX.md template."""
+    """Analyse git history and generate a personalised CTX.md.
+
+    Phase 1: Scans the last 50 commits locally (no LLM) to detect language,
+    emoji usage, commit type conventions, and frequent modules.
+
+    Phase 2: Calls the LLM once to generate a CTX.md draft based on the
+    detected patterns, then shows it for your review before saving.
+    """
+    from .agent.prompts import CONFIG_INIT_SYSTEM_PROMPT, build_config_init_prompt
+    from .agent.models import StandupOutput  # reused as plain-text container
+    from .agent import create_llm_client
+    from rich.syntax import Syntax
+
+    # ── Phase 1: local analysis ───────────────────────────────────────────
     try:
-        from .context import GitReader
-        git = GitReader()
-        state = git.get_state()
+        from .context.git_reader import GitReader
+        git_reader = GitReader()
+        state = git_reader.get_state(commit_limit=1)
     except Exception as e:
-        rprint(f"[red]Error reading git state: {e}[/red]")
+        rprint(f"[red]Not a git repository:[/red] {e}")
         raise typer.Exit(1)
+
+    with console.status("[bold]分析 git 历史...[/bold]"):
+        patterns = git_reader.analyze_commit_patterns(limit=50)
+
+    if not patterns:
+        rprint("[yellow]没有找到提交记录，将生成通用模板。[/yellow]")
+
+    # Show what was detected
+    lang_label = {"zh": "中文", "en": "English", "mixed": "混合"}.get(
+        patterns.get("language", "en"), "Unknown"
+    )
+    console.print()
+    console.print(f"[bold]检测到（基于最近 {patterns.get('total_analyzed', 0)} 条 commits）：[/bold]")
+    console.print(f"  语言：{lang_label}")
+    console.print(f"  Emoji：{'✅ 使用' if patterns.get('uses_emoji') else '❌ 未使用'}")
+    console.print(f"  Conventional Commits：{'✅ 使用' if patterns.get('uses_type') else '❌ 未使用'}")
+    console.print(f"  Scope：{'✅ 使用' if patterns.get('uses_scope') else '❌ 未使用'}")
+    if patterns.get("top_scopes"):
+        console.print(f"  常用模块：{', '.join(patterns['top_scopes'])}")
+    console.print()
+
+    # ── Phase 2: LLM generation ───────────────────────────────────────────
+    try:
+        from .config import load_config
+        cfg = load_config()
+        llm = create_llm_client(cfg.llm)
+    except Exception as e:
+        rprint(f"[red]LLM 配置错误：{e}[/red]")
+        raise typer.Exit(1)
+
+    user_prompt = build_config_init_prompt(
+        repo_name=state.repo_name,
+        patterns=patterns,
+    )
+
+    try:
+        with console.status("[bold green]AI 生成 CTX.md 草稿...[/bold green]"):
+            result = llm.complete(
+                system=CONFIG_INIT_SYSTEM_PROMPT,
+                user=user_prompt,
+                output_model=StandupOutput,  # only .content is used
+            )
+        generated_content = result.content.strip()
+    except Exception as e:
+        from .agent.llm import LLMRateLimitError
+        if isinstance(e, LLMRateLimitError):
+            rprint(f"[yellow]⚠️ 限速：{e}[/yellow]")
+        else:
+            rprint(f"[red]LLM 错误：{e}[/red]")
+        rprint("[dim]将生成通用模板代替。[/dim]")
+        generated_content = _default_ctx_template(state.repo_name)
+
+    # ── Phase 3: user confirmation ────────────────────────────────────────
+    console.print("[bold]生成的 CTX.md 内容：[/bold]\n")
+    console.print(Syntax(generated_content, "markdown", theme="github-dark", word_wrap=True))
+    console.print()
 
     ctx_path = Path.cwd() / "CTX.md"
     if ctx_path.exists():
-        overwrite = typer.confirm("CTX.md already exists. Overwrite?", default=False)
-        if not overwrite:
+        if not Confirm.ask("CTX.md 已存在，覆盖？", default=False):
             raise typer.Exit(0)
 
-    # Generate a template based on discovered info
-    branch = state.branch_name
-    repo = state.repo_name
-    template = f"""# {repo} — Project Context
+    action = Prompt.ask(
+        "操作",
+        choices=["s", "e", "q"],
+        default="s",
+        show_choices=False,
+    )
+    console.print("  [dim][s] 直接保存  [e] 在编辑器里修改后保存  [q] 放弃[/dim]")
+    action = Prompt.ask("请输入", choices=["s", "e", "q"], default="s")
+
+    if action == "q":
+        rprint("[dim]已放弃。[/dim]")
+        raise typer.Exit(0)
+
+    if action == "e":
+        import subprocess, tempfile, os
+        editor = os.environ.get("EDITOR", "nano")
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".md", delete=False, encoding="utf-8"
+        ) as f:
+            f.write(generated_content)
+            tmp = f.name
+        subprocess.run([editor, tmp])
+        with open(tmp, encoding="utf-8") as f:
+            generated_content = f.read()
+        os.unlink(tmp)
+
+    ctx_path.write_text(generated_content, encoding="utf-8")
+    rprint(f"\n[green]✅ CTX.md 已保存到 {ctx_path}[/green]")
+    rprint("[dim]提示：把它提交到 git，团队成员也能享受个性化输出。[/dim]")
+
+
+def _default_ctx_template(repo_name: str) -> str:
+    """Fallback generic CTX.md when LLM is unavailable."""
+    return f"""# {repo_name} — Project Context
 
 ## Project Background
 
@@ -631,12 +784,7 @@ always:
 
 never:
   - Include file paths in commit messages
-  - Include binary file changes in commit messages
 """
-
-    ctx_path.write_text(template)
-    rprint(f"[green]CTX.md created at {ctx_path}[/green]")
-    rprint("[dim]Edit it to reflect your project's conventions.[/dim]")
 
 
 @config_app.command("show")

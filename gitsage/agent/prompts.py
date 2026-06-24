@@ -266,3 +266,65 @@ Commits:
 
 Summarize what happened in this period. Focus on significant changes.
 """
+
+
+# ---------------------------------------------------------------------------
+# config init prompts
+# ---------------------------------------------------------------------------
+
+CONFIG_INIT_SYSTEM_PROMPT = """You are an expert developer tooling assistant helping to generate a CTX.md
+project context file for gitsage.
+
+CTX.md is read by gitsage before every command to personalise its AI output.
+It should capture:
+- What the project does (briefly)
+- Commit message conventions detected from git history
+- Standup format/audience
+- Deterministic rules (always/never)
+
+Keep the file concise (under 60 lines). Do NOT invent information not supported
+by the commit history provided. Write in the same language as the project's commits.
+Output ONLY the CTX.md content — no explanation, no markdown fences.
+"""
+
+
+def build_config_init_prompt(
+    repo_name: str,
+    patterns: dict,
+) -> str:
+    """Build the user prompt for intelligent CTX.md generation."""
+    lang = patterns.get("language", "en")
+    uses_emoji = patterns.get("uses_emoji", False)
+    uses_type = patterns.get("uses_type", False)
+    uses_scope = patterns.get("uses_scope", False)
+    avg_len = patterns.get("avg_length", 50)
+    top_scopes = patterns.get("top_scopes", [])
+    top_types = patterns.get("top_types", [])
+    sample_msgs = patterns.get("sample_msgs", [])
+    total = patterns.get("total_analyzed", 0)
+
+    sample_block = "\n".join(f"  - {m}" for m in sample_msgs) if sample_msgs else "  (none)"
+
+    return f"""Generate a CTX.md file for repository: {repo_name}
+
+Analysis of the last {total} commits:
+- Language: {lang} ({"Chinese/中文" if lang == "zh" else "English" if lang == "en" else "mixed"})
+- Uses emoji: {"yes" if uses_emoji else "no"}
+- Uses Conventional Commits type prefix (feat/fix/etc): {"yes" if uses_type else "no"}
+- Uses scope (feat(module): ...): {"yes" if uses_scope else "no"}
+- Average commit message length: {avg_len} chars
+- Most common scopes/modules: {", ".join(top_scopes) if top_scopes else "none detected"}
+- Most common types: {", ".join(top_types) if top_types else "none detected"}
+
+Sample commit messages:
+{sample_block}
+
+Generate a CTX.md that:
+1. Has a short ## Project Background section (leave a placeholder note for the user to fill in project description)
+2. Has a ## Commit Rules section reflecting the DETECTED style above (with a concrete example)
+3. Has a ## Standup Format section with sensible defaults
+4. Has a ## Rules section with always/never rules derived from the patterns
+5. Uses the same language as the detected commit language
+
+Output ONLY the CTX.md content.
+"""

@@ -79,6 +79,32 @@ class GitReader:
             diff = ""
         return diff
 
+    def get_branch_diff(self, base_branch: str = "main") -> str:
+        """Return unified diff of all changes on the current branch vs base_branch.
+
+        Uses three-dot diff (git diff base...HEAD) which compares from the
+        common ancestor, so it only shows changes made on this branch, not
+        unrelated commits on base.
+
+        Falls back to staged diff if branch comparison fails.
+        """
+        try:
+            # Three-dot: shows only what this branch added/changed
+            diff = self._repo.git.diff(f"{base_branch}...HEAD")
+            if diff.strip():
+                return diff
+        except git.GitCommandError:
+            pass
+        # Fallback: try two-dot
+        try:
+            diff = self._repo.git.diff(f"{base_branch}..HEAD")
+            if diff.strip():
+                return diff
+        except git.GitCommandError:
+            pass
+        # Final fallback: staged diff
+        return self.get_staged_diff()
+
     def get_staged_files(self) -> list[str]:
         """Return list of file paths that are staged for commit."""
         try:
@@ -169,6 +195,84 @@ class GitReader:
         except (IndexError, AttributeError, Exception):
             # Fall back to working directory folder name
             return Path(self._repo.working_dir).name
+
+    def analyze_commit_patterns(self, limit: int = 50) -> dict:
+        """Analyse recent commits and return a dict of detected style patterns.
+
+        Returns a dict with keys:
+            language        "zh" | "en" | "mixed"
+            uses_emoji      bool
+            uses_type       bool  (feat/fix/chore prefix)
+            uses_scope      bool  (feat(scope): ...)
+            avg_length      int   (chars, subject line)
+            top_scopes      list[str]  (most frequent scopes)
+            top_types       list[str]  (most frequent types)
+            sample_msgs     list[str]  (3 representative messages)
+        """
+        import unicodedata
+
+        try:
+            raw = list(self._repo.iter_commits("HEAD", max_count=limit))
+        except Exception:
+            return {}
+
+        messages = [c.message.strip().splitlines()[0] for c in raw if c.message.strip()]
+        if not messages:
+            return {}
+
+        # Emoji detection: any char in Emoji category
+        def has_emoji(s: str) -> bool:
+            return any(unicodedata.category(ch) in ("So", "Sm") or ord(ch) > 0x1F000 for ch in s)
+
+        # CJK ratio
+        def cjk_ratio(s: str) -> float:
+            cjk = sum(1 for ch in s if "一" <= ch <= "鿿")
+            return cjk / max(len(s), 1)
+
+        # Conventional commits pattern
+        _TYPE_RE = re.compile(r"^(feat|fix|chore|refactor|docs|test|style|perf|ci|build|revert)(\(.+?\))?!?:\s", re.IGNORECASE)
+
+        emoji_count = sum(1 for m in messages if has_emoji(m))
+        type_count = sum(1 for m in messages if _TYPE_RE.match(m))
+        scope_matches = [_TYPE_RE.match(m) for m in messages]
+        scope_count = sum(1 for m in scope_matches if m and m.group(2))
+
+        # Average length
+        avg_len = int(sum(len(m) for m in messages) / len(messages))
+
+        # Top scopes
+        from collections import Counter
+        scopes = [m.group(2).strip("()") for m in scope_matches if m and m.group(2)]
+        top_scopes = [s for s, _ in Counter(scopes).most_common(5)]
+
+        # Top types
+        types = [_TYPE_RE.match(m).group(1).lower() for m in messages if _TYPE_RE.match(m)]
+        top_types = [t for t, _ in Counter(types).most_common(5)]
+
+        # Language
+        cjk_ratios = [cjk_ratio(m) for m in messages]
+        avg_cjk = sum(cjk_ratios) / len(cjk_ratios)
+        if avg_cjk > 0.3:
+            language = "zh"
+        elif avg_cjk > 0.1:
+            language = "mixed"
+        else:
+            language = "en"
+
+        # Sample messages: pick 3 representative ones
+        sample_msgs = messages[:3]
+
+        return {
+            "language": language,
+            "uses_emoji": emoji_count / len(messages) > 0.3,
+            "uses_type": type_count / len(messages) > 0.5,
+            "uses_scope": scope_count / len(messages) > 0.3,
+            "avg_length": avg_len,
+            "top_scopes": top_scopes,
+            "top_types": top_types,
+            "sample_msgs": sample_msgs,
+            "total_analyzed": len(messages),
+        }
 
     def get_file_blame(self, filepath: str) -> list[dict]:
         """Return blame information for *filepath*.

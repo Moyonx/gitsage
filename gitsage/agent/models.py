@@ -52,3 +52,38 @@ class CatchupOutput(BaseModel):
     highlights: list[str] = []
     period_description: str
     commit_count: int = 0
+
+
+class ExplainStep(BaseModel):
+    """One iteration of the explain Agent loop.
+
+    The agent either requests more data (done=False) or delivers the final
+    explanation (done=True).
+    """
+
+    thinking: str = Field(
+        description="Agent's reasoning about what to do next"
+    )
+    action: Literal["get_commit", "get_pr", "get_issue", "read_file", "done"] = Field(
+        description="Tool to call, or 'done' to deliver final explanation"
+    )
+    params: dict = Field(
+        default_factory=dict,
+        description="Parameters for the action (e.g. {'sha': 'abc123'} or {'pr_number': 89})",
+    )
+    done: bool = Field(
+        description="True when the agent has enough context to explain"
+    )
+    # Populated when done=True
+    explanation: str = Field(
+        default="",
+        description="Final explanation of why the code exists (only when done=True)",
+    )
+    confidence: Literal["high", "medium", "low"] = Field(
+        default="medium",
+        description="Confidence in the explanation (only when done=True)",
+    )
+    sources: list[str] = Field(
+        default_factory=list,
+        description="Commit SHAs, PR/Issue numbers referenced (only when done=True)",
+    )

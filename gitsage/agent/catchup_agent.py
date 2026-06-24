@@ -26,6 +26,7 @@ class CatchupAgent:
         since_tag: str = "",
         since_date: str = "",
         repo_path: Path = None,
+        language_preamble: str = "",
     ) -> CatchupOutput:
         root = repo_path or Path.cwd()
         git_reader = GitReader(root)
@@ -55,7 +56,7 @@ class CatchupAgent:
         )
 
         output = self._llm.complete(
-            system=CATCHUP_SYSTEM_PROMPT,
+            system=language_preamble + CATCHUP_SYSTEM_PROMPT,
             user=user_prompt,
             output_model=CatchupOutput,
         )

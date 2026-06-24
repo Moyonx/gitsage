@@ -31,6 +31,7 @@ class PRContext:
     git_state: GitState
     ctx: CTXContent
     base_branch: str
+    branch_diff: str  # full diff of current branch vs base (three-dot)
 
 
 class ContextBuilder:
@@ -78,14 +79,16 @@ class ContextBuilder:
     def build_pr_context(self, base_branch: str = "main") -> PRContext:
         """Build context for pull request description generation.
 
-        Fetches a broader commit history so the PR prompt has full branch
-        context. The base_branch is recorded for the diff boundary.
+        Uses three-dot branch diff (base...HEAD) to capture all changes on the
+        current branch, regardless of what is currently staged.
+        Falls back to staged diff if branch comparison fails.
         """
-        # Use a higher commit limit for PR context
         git_state = self._git.get_state(commit_limit=50)
         ctx = self._ctx_reader.read()
+        branch_diff = self._git.get_branch_diff(base_branch)
         return PRContext(
             git_state=git_state,
             ctx=ctx,
             base_branch=base_branch,
+            branch_diff=branch_diff,
         )

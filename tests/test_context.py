@@ -194,6 +194,71 @@ class TestMemoryManagerReadEmpty:
 
 
 # ---------------------------------------------------------------------------
+# MemoryManager.record_commit and update_memory_async tests
+# ---------------------------------------------------------------------------
+
+class TestMemoryManagerRecordCommit:
+    def test_record_commit_appends_observation(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("gitsage.context.memory.MEMORY_DIR", tmp_path)
+        mgr = MemoryManager("test/repo")
+        mgr.record_commit(message="feat: add thing", category="feat", branch="main")
+        content = mgr.read()
+        assert "feat: add thing" in content
+        assert "commit" in content
+
+    def test_record_commit_stores_category_and_branch(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("gitsage.context.memory.MEMORY_DIR", tmp_path)
+        mgr = MemoryManager("test/repo")
+        mgr.record_commit(message="fix: bug", category="fix", branch="feature/xyz")
+        obs = mgr.get_raw_observations()
+        assert len(obs) == 1
+        assert "fix: bug" in obs[0]
+        assert "fix" in obs[0]
+        assert "feature/xyz" in obs[0]
+
+    def test_record_commit_triggers_summarise_when_threshold_reached(
+        self, tmp_path, monkeypatch
+    ):
+        from unittest.mock import MagicMock
+        monkeypatch.setattr("gitsage.context.memory.MEMORY_DIR", tmp_path)
+        monkeypatch.setattr("gitsage.context.memory.SUMMARIZE_EVERY", 3)
+        mgr = MemoryManager("test/repo")
+
+        mock_llm = MagicMock()
+        mock_llm.complete.return_value = MagicMock(content="Summary text")
+
+        for i in range(3):
+            mgr.record_commit(f"feat: change {i}", llm_client=mock_llm)
+
+        mock_llm.complete.assert_called_once()
+
+    def test_record_commit_no_llm_skips_summarise(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("gitsage.context.memory.MEMORY_DIR", tmp_path)
+        monkeypatch.setattr("gitsage.context.memory.SUMMARIZE_EVERY", 1)
+        mgr = MemoryManager("test/repo")
+        # Should not raise even though threshold is 1 and no llm_client
+        mgr.record_commit("feat: something", llm_client=None)
+
+
+class TestUpdateMemoryAsync:
+    def test_async_update_does_not_raise(self, tmp_path, monkeypatch):
+        """update_memory_async must never raise — it's fire-and-forget."""
+        from gitsage.context.memory import update_memory_async
+        # Should not raise even with a bad repo name or no LLM
+        update_memory_async("owner/repo", "feat: async test", "feat", "main", None)
+        # Success = no exception raised
+
+    def test_async_update_writes_to_memory_synchronously_via_record_commit(
+        self, tmp_path, monkeypatch
+    ):
+        """Verify the underlying record_commit works (thread timing aside)."""
+        monkeypatch.setattr("gitsage.context.memory.MEMORY_DIR", tmp_path)
+        mgr = MemoryManager("owner/repo")
+        mgr.record_commit("feat: direct test", "feat", "main", None)
+        assert "feat: direct test" in mgr.read()
+
+
+# ---------------------------------------------------------------------------
 # SkillLoader tests
 # ---------------------------------------------------------------------------
 
