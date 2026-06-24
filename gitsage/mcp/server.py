@@ -1,6 +1,7 @@
-"""MCP Server for gitsage - exposes git state as tools."""
+"""MCP Server for gitsage - exposes git state and AI generation as tools."""
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -80,13 +81,38 @@ def create_server() -> "Server":
                     "required": ["file_path"],
                 },
             ),
+            Tool(
+                name="generate_commit_message",
+                description=(
+                    "Generate AI-powered commit message candidates for currently staged changes. "
+                    "Respects project CTX.md conventions, user memory, and style preferences. "
+                    "Returns 2-3 ranked candidates with confidence scores. "
+                    "Requires staged files (git add) and a configured LLM."
+                ),
+                inputSchema={"type": "object", "properties": {}, "required": []},
+            ),
+            Tool(
+                name="generate_standup",
+                description=(
+                    "Generate an AI-powered standup report from today's commits. "
+                    "Respects project CTX.md conventions and user style preferences. "
+                    "Returns structured content ready to share with your team."
+                ),
+                inputSchema={"type": "object", "properties": {}, "required": []},
+            ),
         ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         try:
-            git = _git_reader()
-            result = _dispatch(git, name, arguments)
+            path = Path.cwd()
+            if name == "generate_commit_message":
+                result = await asyncio.to_thread(_generate_commit_message, path, arguments)
+            elif name == "generate_standup":
+                result = await asyncio.to_thread(_generate_standup, path, arguments)
+            else:
+                git = _git_reader()
+                result = _dispatch(git, name, arguments)
             return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, default=str))]
         except Exception as e:
             return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
@@ -156,6 +182,126 @@ def _dispatch(git: GitReader, name: str, args: dict) -> Any:
 
     else:
         return {"error": f"Unknown tool: {name}"}
+
+
+# ---------------------------------------------------------------------------
+# LLM generation helpers (synchronous — called via asyncio.to_thread)
+# ---------------------------------------------------------------------------
+
+def _generate_commit_message(path: Path, args: dict) -> dict:  # noqa: ARG001
+    """Generate commit message candidates for staged changes.
+
+    Reuses the full gitsage commit pipeline: context assembly, LLM call,
+    quality gate, and deterministic override.
+    """
+    from ..config import load_config
+    from ..context import ContextBuilder
+    from ..agent import create_llm_client, build_commit_user_prompt, CommitOutput
+    from ..agent.prompts import COMMIT_SYSTEM_PROMPT
+    from ..harness import QualityGate, DeterministicOverride
+    from ..preferences import load_preferences
+
+    cfg = load_config()
+    builder = ContextBuilder(path)
+    ctx = builder.build_commit_context()
+
+    if ctx.git_state.is_clean:
+        return {"error": "No staged changes found. Stage files with 'git add' first."}
+
+    recent_msgs = [c.message for c in ctx.git_state.recent_commits]
+    user_prompt = build_commit_user_prompt(
+        diff=ctx.git_state.staged_diff,
+        recent_commits=recent_msgs,
+        branch_name=ctx.git_state.branch_name,
+        ctx_content=ctx.ctx.raw,
+        memory_content=ctx.memory_content,
+        skill_content="",
+    )
+
+    prefs = load_preferences()
+    pref_hint = prefs.to_prompt_hint()
+    system = (
+        prefs.language_preamble
+        + COMMIT_SYSTEM_PROMPT
+        + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
+    )
+
+    llm = create_llm_client(cfg.llm)
+    output: CommitOutput = llm.complete(system=system, user=user_prompt, output_model=CommitOutput)
+
+    gate = QualityGate.for_commit()
+    override = DeterministicOverride(cfg.rules, branch_name=ctx.git_state.branch_name)
+
+    candidates = []
+    for c in output.candidates:
+        gate.check(c.message)
+        c.message = override.apply_to_commit(c.message)
+        candidates.append({
+            "message": c.message,
+            "confidence": c.confidence,
+            "reason": c.reason,
+        })
+
+    result: dict[str, Any] = {
+        "candidates": candidates,
+        "staged_files": ctx.git_state.staged_files,
+        "branch": ctx.git_state.branch_name,
+    }
+    if output.warning:
+        result["warning"] = output.warning
+    return result
+
+
+def _generate_standup(path: Path, args: dict) -> dict:  # noqa: ARG001
+    """Generate a standup report from today's commits.
+
+    Reuses the full gitsage standup pipeline: context assembly, LLM call,
+    and user style preferences.
+    """
+    from ..config import load_config
+    from ..context import ContextBuilder
+    from ..agent import create_llm_client, build_standup_user_prompt, StandupOutput
+    from ..agent.prompts import STANDUP_SYSTEM_PROMPT
+    from ..preferences import load_preferences
+
+    cfg = load_config()
+    builder = ContextBuilder(path)
+    ctx = builder.build_standup_context()
+
+    commits_data = [
+        {
+            "sha": c.sha,
+            "message": c.message,
+            "author": c.author,
+            "timestamp": c.date.strftime("%H:%M"),
+        }
+        for c in ctx.git_state.today_commits
+    ]
+
+    user_prompt = build_standup_user_prompt(
+        commits=commits_data,
+        date_str=ctx.date_str,
+        ctx_content=ctx.ctx.raw,
+        memory_content=ctx.memory_content,
+        skill_content="",
+    )
+
+    prefs = load_preferences()
+    pref_hint = prefs.to_prompt_hint()
+    system = (
+        prefs.language_preamble
+        + STANDUP_SYSTEM_PROMPT
+        + (f"\n\n## Style Preferences\n{pref_hint}" if pref_hint else "")
+    )
+
+    llm = create_llm_client(cfg.llm)
+    output: StandupOutput = llm.complete(system=system, user=user_prompt, output_model=StandupOutput)
+
+    return {
+        "content": output.content,
+        "commit_count": len(commits_data),
+        "date": ctx.date_str,
+    }
 
 
 async def run_server() -> None:
