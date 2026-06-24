@@ -345,3 +345,137 @@ class TestSkillLoaderMissingReturnsNone:
         skills = loader.load_all()
         assert isinstance(skills, list)
         # May or may not have global skills — just check it's a list
+
+
+# ---------------------------------------------------------------------------
+# skill add / show / edit CLI command tests
+# ---------------------------------------------------------------------------
+
+class TestSkillAddFileCreation:
+    """Test that skill add creates a correctly formed SKILL.md."""
+
+    def _invoke_skill_add(self, tmp_path, name: str, scope: str = "project", monkeypatch=None):
+        """Helper: run skill_add with mocked prompts."""
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+        from gitsage.skills.loader import PROJECT_SKILLS_DIR_NAME
+
+        runner = CliRunner()
+
+        # Prompt.ask calls:  name (if not given), description, trigger choice
+        with patch("gitsage.cli.Prompt.ask", side_effect=["A test skill desc", "1"]), \
+             patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["skill", "add", name, "--scope", scope])
+
+        return result
+
+    def test_skill_add_creates_skill_md(self, tmp_path, monkeypatch):
+        from gitsage.skills.loader import PROJECT_SKILLS_DIR_NAME
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+
+        runner = CliRunner()
+        with patch("gitsage.cli.Prompt.ask", side_effect=["A test skill desc", "1"]), \
+             patch("pathlib.Path.cwd", return_value=tmp_path):
+            runner.invoke(app, ["skill", "add", "my-test-skill", "--scope", "project"])
+
+        skill_file = tmp_path / PROJECT_SKILLS_DIR_NAME / "my-test-skill" / "SKILL.md"
+        assert skill_file.exists(), f"Expected {skill_file} to exist"
+
+    def test_skill_add_frontmatter_is_valid(self, tmp_path):
+        from gitsage.skills.loader import PROJECT_SKILLS_DIR_NAME
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+
+        runner = CliRunner()
+        with patch("gitsage.cli.Prompt.ask", side_effect=["My desc", "1"]), \
+             patch("pathlib.Path.cwd", return_value=tmp_path):
+            runner.invoke(app, ["skill", "add", "alpha-skill", "--scope", "project"])
+
+        skill_file = tmp_path / PROJECT_SKILLS_DIR_NAME / "alpha-skill" / "SKILL.md"
+        content = skill_file.read_text(encoding="utf-8")
+        assert "name: alpha-skill" in content
+        assert "description: My desc" in content
+        assert "trigger: auto" in content
+
+    def test_skill_add_created_skill_is_loadable(self, tmp_path):
+        """SkillLoader should be able to load the file created by skill add."""
+        from gitsage.skills.loader import PROJECT_SKILLS_DIR_NAME
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+
+        runner = CliRunner()
+        with patch("gitsage.cli.Prompt.ask", side_effect=["Loadable desc", "1"]), \
+             patch("pathlib.Path.cwd", return_value=tmp_path):
+            runner.invoke(app, ["skill", "add", "loadable-skill", "--scope", "project"])
+
+        loader = SkillLoader(repo_path=tmp_path)
+        skill = loader.load("loadable-skill")
+        assert skill is not None
+        assert skill.name == "loadable-skill"
+        assert skill.description == "Loadable desc"
+        assert skill.trigger == "auto"
+
+    def test_skill_add_duplicate_returns_nonzero(self, tmp_path):
+        """Adding a skill that already exists should exit with code 1."""
+        from gitsage.skills.loader import PROJECT_SKILLS_DIR_NAME
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+
+        # Create the skill first
+        skill_dir = tmp_path / PROJECT_SKILLS_DIR_NAME / "dup-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text("---\nname: dup-skill\n---\n", encoding="utf-8")
+
+        runner = CliRunner()
+        with patch("gitsage.cli.Prompt.ask", side_effect=["desc", "1"]), \
+             patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["skill", "add", "dup-skill", "--scope", "project"])
+
+        assert result.exit_code == 1
+
+    def test_skill_add_invalid_name_returns_nonzero(self, tmp_path):
+        """Names with uppercase or special chars should exit with code 1."""
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+
+        runner = CliRunner()
+        # "INVALID_NAME" contains uppercase — regex rejects it
+        with patch("gitsage.cli.Prompt.ask", side_effect=["desc", "1"]), \
+             patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["skill", "add", "INVALID_NAME", "--scope", "project"])
+
+        assert result.exit_code == 1
+
+
+class TestSkillShowCommand:
+    def test_skill_show_existing_skill(self, tmp_path):
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+        from gitsage.skills.loader import PROJECT_SKILLS_DIR_NAME
+
+        skill_dir = tmp_path / PROJECT_SKILLS_DIR_NAME / "show-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: show-skill\ndescription: A visible skill\ntrigger: manual\n---\n"
+            "# Show Skill\nInstructions here.\n",
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["skill", "show", "show-skill"])
+
+        assert result.exit_code == 0
+        assert "show-skill" in result.output
+        assert "manual" in result.output
+
+    def test_skill_show_missing_skill_returns_nonzero(self, tmp_path):
+        from typer.testing import CliRunner
+        from gitsage.cli import app
+
+        runner = CliRunner()
+        with patch("pathlib.Path.cwd", return_value=tmp_path):
+            result = runner.invoke(app, ["skill", "show", "ghost-skill"])
+
+        assert result.exit_code == 1

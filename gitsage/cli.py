@@ -1137,6 +1137,136 @@ def skill_list() -> None:
     console.print(table)
 
 
+@skill_app.command("show")
+def skill_show(
+    name: str = typer.Argument(..., help="Skill name to display."),
+) -> None:
+    """Show the full content of a skill."""
+    from .skills import SkillLoader
+    from rich.syntax import Syntax
+
+    loader = SkillLoader()
+    skill = loader.load(name)
+    if skill is None:
+        rprint(f"[red]Skill '{name}' not found.[/red]")
+        rprint("[dim]Run 'gitsage skill list' to see available skills.[/dim]")
+        raise typer.Exit(1)
+
+    source = "project" if ".gitsage/skills" in str(skill.path) else "global"
+    console.print(f"\n[bold]{skill.name}[/bold]  [dim]({source})[/dim]")
+    console.print(f"[dim]Path: {skill.path}[/dim]")
+    console.print(f"  trigger     : {skill.trigger}")
+    console.print(f"  description : {skill.description or '(none)'}")
+    console.print()
+    full_text = skill.path.read_text(encoding="utf-8")
+    console.print(Syntax(full_text, "markdown", theme="github-dark", word_wrap=True))
+
+
+@skill_app.command("add")
+def skill_add(
+    name: Optional[str] = typer.Argument(None, help="Skill name (slug)."),
+    scope: str = typer.Option(
+        "project",
+        "--scope", "-s",
+        help="Where to create the skill: 'project' (.gitsage/skills) or 'global' (~/.gitsage/skills).",
+    ),
+) -> None:
+    """Create a new skill interactively."""
+    from .skills.loader import GLOBAL_SKILLS_DIR, PROJECT_SKILLS_DIR_NAME
+    import re
+
+    console.print()
+    console.print(Panel(
+        "[bold]创建新 Skill[/bold]\n\n"
+        "Skill 是注入到 AI prompt 的专用指令文件，可以自定义特定任务的输出格式和行为。",
+        title="[bold cyan]➕ gitsage skill add[/bold cyan]",
+        expand=False,
+    ))
+    console.print()
+
+    # ── Name ────────────────────────────────────────────────────────────────
+    if name is None:
+        name = Prompt.ask("[bold]Skill 名称[/bold] [dim](slug 格式，如 commit-emoji)[/dim]")
+    name = name.strip().lower().replace(" ", "-")
+    if not re.match(r'^[a-z0-9][a-z0-9-]*$', name):
+        rprint(f"[red]无效名称 '{name}'：只能包含小写字母、数字和连字符，且不能以连字符开头。[/red]")
+        raise typer.Exit(1)
+
+    # ── Scope ───────────────────────────────────────────────────────────────
+    if scope not in ("project", "global"):
+        rprint(f"[red]无效的 scope '{scope}'，必须是 'project' 或 'global'。[/red]")
+        raise typer.Exit(1)
+
+    if scope == "project":
+        skill_dir = Path.cwd() / PROJECT_SKILLS_DIR_NAME / name
+    else:
+        skill_dir = GLOBAL_SKILLS_DIR / name
+
+    if (skill_dir / "SKILL.md").exists():
+        rprint(f"[yellow]Skill '{name}' 已存在（{skill_dir}）。[/yellow]")
+        rprint("[dim]使用 'gitsage skill edit <name>' 编辑它。[/dim]")
+        raise typer.Exit(1)
+
+    # ── Description ─────────────────────────────────────────────────────────
+    description = Prompt.ask("[bold]描述[/bold] [dim](一行简短说明)[/dim]", default="")
+
+    # ── Trigger ─────────────────────────────────────────────────────────────
+    console.print()
+    console.print("[bold]触发方式[/bold]")
+    console.print("  [cyan][1][/cyan] auto   — 每次相关命令自动注入（推荐）")
+    console.print("  [cyan][2][/cyan] manual — 仅当手动指定时生效\n")
+    trigger_choice = Prompt.ask("  选择", choices=["1", "2"], default="1")
+    trigger = "auto" if trigger_choice == "1" else "manual"
+
+    # ── Write SKILL.md ───────────────────────────────────────────────────────
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    skill_path = skill_dir / "SKILL.md"
+    template = f"""---
+name: {name}
+description: {description}
+trigger: {trigger}
+---
+# {name.replace("-", " ").title()} Skill
+
+在这里写给 AI 的专用指令。这些内容会被注入到相关命令的 prompt 中。
+
+## 适用场景
+- 描述何时/为何应用这个 skill
+
+## 格式要求
+- 例：所有 commit message 必须包含 emoji 前缀
+
+## 示例
+- ✨ feat(payment): 新增支付重试机制
+"""
+    skill_path.write_text(template, encoding="utf-8")
+
+    rprint(f"\n[green]✅ Skill '{name}' 已创建[/green]")
+    rprint(f"[dim]路径：{skill_path}[/dim]")
+    rprint(f"\n[dim]用你的编辑器完善内容：[/dim]")
+    rprint(f"  [bold cyan]gitsage skill edit {name}[/bold cyan]")
+
+
+@skill_app.command("edit")
+def skill_edit(
+    name: str = typer.Argument(..., help="Skill name to edit."),
+) -> None:
+    """Open a skill in your editor ($EDITOR)."""
+    from .skills import SkillLoader
+
+    loader = SkillLoader()
+    skill = loader.load(name)
+    if skill is None:
+        rprint(f"[red]Skill '{name}' not found.[/red]")
+        rprint("[dim]Run 'gitsage skill list' to see available skills, or 'gitsage skill add' to create one.[/dim]")
+        raise typer.Exit(1)
+
+    editor = os.environ.get("EDITOR", "nano")
+    rprint(f"[dim]Opening {skill.path} in {editor}...[/dim]")
+    subprocess.run([editor, str(skill.path)])
+    rprint(f"[green]✅ Skill '{name}' 已保存。[/green]")
+
+
 # ---------------------------------------------------------------------------
 # setup command
 # ---------------------------------------------------------------------------
