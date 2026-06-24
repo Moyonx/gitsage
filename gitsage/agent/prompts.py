@@ -328,3 +328,32 @@ Generate a CTX.md that:
 
 Output ONLY the CTX.md content.
 """
+
+
+CTX_MODIFY_SYSTEM_PROMPT = """You are helping a developer refine their CTX.md project context file.
+
+The user will give you:
+1. The current CTX.md content
+2. A natural language instruction describing what to change
+
+Your task: apply the requested change and return the COMPLETE updated CTX.md.
+
+Rules:
+- Make ONLY the requested change. Leave everything else exactly as-is.
+- Keep the same structure and section headers unless asked to change them.
+- Write in the same language as the existing CTX.md.
+- Output ONLY the CTX.md content — no explanation, no markdown fences.
+"""
+
+
+def build_ctx_modify_prompt(current_content: str, instruction: str) -> str:
+    """Build prompt for natural-language CTX.md modification."""
+    return f"""Current CTX.md:
+---
+{current_content}
+---
+
+User's modification request: {instruction}
+
+Apply this change and return the complete updated CTX.md.
+"""

@@ -670,18 +670,27 @@ def catchup(
 
 @config_app.command("init")
 def config_init() -> None:
-    """Analyse git history and generate a personalised CTX.md.
+    """Analyse git history and generate a personalised CTX.md interactively.
 
-    Phase 1: Scans the last 50 commits locally (no LLM) to detect language,
-    emoji usage, commit type conventions, and frequent modules.
-
-    Phase 2: Calls the LLM once to generate a CTX.md draft based on the
-    detected patterns, then shows it for your review before saving.
+    \b
+    Flow:
+      1. Scan last 50 commits locally — detect language, emoji, commit style
+      2. Show detection results and ask for confirmation
+      3. LLM generates a CTX.md draft
+      4. Interactive review loop:
+           [y/Enter]  save
+           [e]        open in $EDITOR
+           [q]        quit without saving
+           <anything else>  natural-language modification (e.g. "改成英文输出")
     """
-    from .agent.prompts import CONFIG_INIT_SYSTEM_PROMPT, build_config_init_prompt
-    from .agent.models import StandupOutput  # reused as plain-text container
+    from .agent.prompts import (
+        CONFIG_INIT_SYSTEM_PROMPT, build_config_init_prompt,
+        CTX_MODIFY_SYSTEM_PROMPT, build_ctx_modify_prompt,
+    )
+    from .agent.models import StandupOutput
     from .agent import create_llm_client
     from rich.syntax import Syntax
+    import os, subprocess, tempfile
 
     # ── Phase 1: local analysis ───────────────────────────────────────────
     try:
@@ -698,21 +707,31 @@ def config_init() -> None:
     if not patterns:
         rprint("[yellow]没有找到提交记录，将生成通用模板。[/yellow]")
 
-    # Show what was detected
+    # ── Phase 2: show detected patterns + confirmation ────────────────────
     lang_label = {"zh": "中文", "en": "English", "mixed": "混合"}.get(
         patterns.get("language", "en"), "Unknown"
     )
     console.print()
-    console.print(f"[bold]检测到（基于最近 {patterns.get('total_analyzed', 0)} 条 commits）：[/bold]")
-    console.print(f"  语言：{lang_label}")
-    console.print(f"  Emoji：{'✅ 使用' if patterns.get('uses_emoji') else '❌ 未使用'}")
-    console.print(f"  Conventional Commits：{'✅ 使用' if patterns.get('uses_type') else '❌ 未使用'}")
-    console.print(f"  Scope：{'✅ 使用' if patterns.get('uses_scope') else '❌ 未使用'}")
+    console.print(
+        f"[bold]检测到（基于最近 {patterns.get('total_analyzed', 0)} 条 commits）：[/bold]"
+    )
+    console.print(f"  语言        : {lang_label}")
+    console.print(f"  Emoji       : {'✅ 使用' if patterns.get('uses_emoji') else '❌ 未使用'}")
+    console.print(
+        f"  类型前缀    : {'✅ feat/fix/chore...' if patterns.get('uses_type') else '❌ 未检测到'}"
+    )
+    console.print(f"  Scope       : {'✅ 带括号模块名' if patterns.get('uses_scope') else '❌ 未使用'}")
     if patterns.get("top_scopes"):
-        console.print(f"  常用模块：{', '.join(patterns['top_scopes'])}")
+        console.print(f"  常用模块    : {', '.join(patterns['top_scopes'])}")
+    if patterns.get("sample_msgs"):
+        console.print(f"  commit 示例 : {patterns['sample_msgs'][0]}")
     console.print()
 
-    # ── Phase 2: LLM generation ───────────────────────────────────────────
+    if not Confirm.ask("基于以上信息生成 CTX.md？", default=True):
+        rprint("[dim]已取消。[/dim]")
+        raise typer.Exit(0)
+
+    # ── Phase 3: LLM generation ───────────────────────────────────────────
     try:
         from .config import load_config
         cfg = load_config()
@@ -721,67 +740,86 @@ def config_init() -> None:
         rprint(f"[red]LLM 配置错误：{e}[/red]")
         raise typer.Exit(1)
 
-    user_prompt = build_config_init_prompt(
-        repo_name=state.repo_name,
-        patterns=patterns,
-    )
+    gen_prompt = build_config_init_prompt(repo_name=state.repo_name, patterns=patterns)
 
     try:
         with console.status("[bold green]AI 生成 CTX.md 草稿...[/bold green]"):
             result = llm.complete(
                 system=CONFIG_INIT_SYSTEM_PROMPT,
-                user=user_prompt,
-                output_model=StandupOutput,  # only .content is used
+                user=gen_prompt,
+                output_model=StandupOutput,
             )
-        generated_content = result.content.strip()
+        content = result.content.strip()
     except Exception as e:
         from .agent.llm import LLMRateLimitError
         if isinstance(e, LLMRateLimitError):
-            rprint(f"[yellow]⚠️ 限速：{e}[/yellow]")
+            rprint(f"[yellow]⚠️ 限速：{e}，使用通用模板。[/yellow]")
         else:
-            rprint(f"[red]LLM 错误：{e}[/red]")
-        rprint("[dim]将生成通用模板代替。[/dim]")
-        generated_content = _default_ctx_template(state.repo_name)
-
-    # ── Phase 3: user confirmation ────────────────────────────────────────
-    console.print("[bold]生成的 CTX.md 内容：[/bold]\n")
-    console.print(Syntax(generated_content, "markdown", theme="github-dark", word_wrap=True))
-    console.print()
+            rprint(f"[red]LLM 错误：{e}，使用通用模板。[/red]")
+        content = _default_ctx_template(state.repo_name)
 
     ctx_path = Path.cwd() / "CTX.md"
-    if ctx_path.exists():
-        if not Confirm.ask("CTX.md 已存在，覆盖？", default=False):
+
+    # ── Phase 4: interactive review + natural-language modification loop ──
+    def _show_content(c: str) -> None:
+        console.print()
+        console.print("[bold]当前 CTX.md 内容：[/bold]")
+        console.print(Syntax(c, "markdown", theme="github-dark", word_wrap=True))
+        console.print()
+        console.print(
+            "[dim]操作：[y/回车] 保存  [e] 在编辑器打开  [q] 放弃  "
+            "或直接输入修改指令（自然语言）[/dim]"
+        )
+
+    _show_content(content)
+
+    while True:
+        raw = input("> ").strip()
+
+        # ── [y / Enter] save ──────────────────────────────────────────────
+        if raw.lower() in ("y", "yes", ""):
+            if ctx_path.exists():
+                if not Confirm.ask("CTX.md 已存在，覆盖？", default=False):
+                    continue
+            ctx_path.write_text(content, encoding="utf-8")
+            rprint(f"\n[green]✅ CTX.md 已保存到 {ctx_path}[/green]")
+            rprint("[dim]建议：提交到 git，团队共享同一套约定。[/dim]")
+            break
+
+        # ── [e] editor ────────────────────────────────────────────────────
+        if raw.lower() == "e":
+            editor = os.environ.get("EDITOR", "nano")
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".md", delete=False, encoding="utf-8"
+            ) as f:
+                f.write(content)
+                tmp = f.name
+            subprocess.run([editor, tmp])
+            with open(tmp, encoding="utf-8") as f:
+                content = f.read().strip()
+            os.unlink(tmp)
+            _show_content(content)
+            continue
+
+        # ── [q] quit ──────────────────────────────────────────────────────
+        if raw.lower() in ("q", "quit", "exit", "n", "no"):
+            rprint("[dim]已放弃，未保存。[/dim]")
             raise typer.Exit(0)
 
-    action = Prompt.ask(
-        "操作",
-        choices=["s", "e", "q"],
-        default="s",
-        show_choices=False,
-    )
-    console.print("  [dim][s] 直接保存  [e] 在编辑器里修改后保存  [q] 放弃[/dim]")
-    action = Prompt.ask("请输入", choices=["s", "e", "q"], default="s")
-
-    if action == "q":
-        rprint("[dim]已放弃。[/dim]")
-        raise typer.Exit(0)
-
-    if action == "e":
-        import subprocess, tempfile, os
-        editor = os.environ.get("EDITOR", "nano")
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".md", delete=False, encoding="utf-8"
-        ) as f:
-            f.write(generated_content)
-            tmp = f.name
-        subprocess.run([editor, tmp])
-        with open(tmp, encoding="utf-8") as f:
-            generated_content = f.read()
-        os.unlink(tmp)
-
-    ctx_path.write_text(generated_content, encoding="utf-8")
-    rprint(f"\n[green]✅ CTX.md 已保存到 {ctx_path}[/green]")
-    rprint("[dim]提示：把它提交到 git，团队成员也能享受个性化输出。[/dim]")
+        # ── natural-language modification ─────────────────────────────────
+        if raw:
+            try:
+                with console.status(f"[bold green]正在修改：{raw[:40]}...[/bold green]"):
+                    mod_result = llm.complete(
+                        system=CTX_MODIFY_SYSTEM_PROMPT,
+                        user=build_ctx_modify_prompt(content, raw),
+                        output_model=StandupOutput,
+                    )
+                content = mod_result.content.strip()
+                rprint("[green]✅ 已修改[/green]")
+            except Exception as e:
+                rprint(f"[red]修改失败：{e}[/red]")
+            _show_content(content)
 
 
 def _default_ctx_template(repo_name: str) -> str:
