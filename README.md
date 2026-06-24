@@ -55,7 +55,7 @@ Enter to accept [1], number to select, e to edit, q to quit:
 ### Install
 
 ```bash
-pip install gitsage
+pip install gitsage-ai
 ```
 
 ### Configure

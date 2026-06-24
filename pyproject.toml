@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "gitsage"
+name = "gitsage-ai"
 version = "0.2.0"
 description = "Git-native AI developer workflow assistant — commit messages, standups, code archaeology"
 readme = "README.md"
