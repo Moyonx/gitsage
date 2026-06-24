@@ -160,6 +160,8 @@ def _parse_ctx_rules(ctx_content: str) -> CTXRules:
         return CTXRules()
     try:
         data = yaml.safe_load(match.group(1)) or {}
+        if not isinstance(data, dict):
+            return CTXRules()
         return CTXRules(
             always=data.get("always", []),
             never=data.get("never", []),
