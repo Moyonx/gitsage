@@ -65,14 +65,35 @@ pip install gitsage-ai
 
 ### Configure
 
+The easiest way is the interactive wizard — it walks you through every option:
+
 ```bash
-# Option A: local model (free, nothing leaves your machine)
+gitsage setup
+```
+
+Or configure manually. gitsage works with **any OpenAI-compatible API** (DeepSeek, OpenAI, Moonshot, SiliconFlow, Azure OpenAI, etc.) plus Anthropic and local Ollama:
+
+```bash
+# Local model — free, nothing leaves your machine
 ollama pull qwen2.5:14b
 gitsage model set ollama/qwen2.5:14b
 
-# Option B: cloud API (DeepSeek recommended — ~$0.001 per commit)
+# DeepSeek — recommended cloud option (~$0.001/commit)
 export DEEPSEEK_API_KEY=sk-...
 gitsage model set deepseek-v4-flash
+
+# OpenAI
+export OPENAI_API_KEY=sk-...
+gitsage model set gpt-4o-mini
+
+# Any OpenAI-compatible endpoint (custom base_url)
+# Edit ~/.gitsage/config.yml:
+#
+# llm:
+#   provider: openai-compatible
+#   base_url: https://api.your-provider.com   # e.g. SiliconFlow, Moonshot, Azure…
+#   api_key: ${YOUR_API_KEY}
+#   model: your-model-name
 ```
 
 ### Run

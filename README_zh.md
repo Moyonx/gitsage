@@ -70,14 +70,35 @@ pip install gitsage-ai
 
 ### 配置
 
+最简单的方式是交互式向导，一步步引导完成配置：
+
 ```bash
-# 方案 A：本地模型（免费，数据不出本机）
+gitsage setup
+```
+
+也可以手动配置。gitsage 支持**任何 OpenAI-compatible 接口**（DeepSeek、OpenAI、月之暗面、硅基流动、Azure OpenAI 等），以及 Anthropic 和本地 Ollama：
+
+```bash
+# 本地模型 — 完全免费，数据不出本机
 ollama pull qwen2.5:14b
 gitsage model set ollama/qwen2.5:14b
 
-# 方案 B：云端 API（推荐 DeepSeek，约 ¥0.007/次 commit）
+# DeepSeek — 推荐的云端方案，约 ¥0.007/次
 export DEEPSEEK_API_KEY=sk-...
 gitsage model set deepseek-v4-flash
+
+# OpenAI
+export OPENAI_API_KEY=sk-...
+gitsage model set gpt-4o-mini
+
+# 任何 OpenAI-compatible 接口（自定义 base_url）
+# 编辑 ~/.gitsage/config.yml：
+#
+# llm:
+#   provider: openai-compatible
+#   base_url: https://api.your-provider.com   # 硅基流动、月之暗面、Azure 等
+#   api_key: ${YOUR_API_KEY}
+#   model: your-model-name
 ```
 
 ### 使用
