@@ -1,11 +1,16 @@
+<div align="right">
+  <strong>English</strong> | <a href="README_zh.md">中文</a>
+</div>
+
 # gitsage
 
-> **Git-native AI developer workflow assistant.**
-> Understands your code changes, learns your style, and helps you express your work — commit messages, standups, PR descriptions, and code archaeology.
+> **AI assistant for git-driven developer workflows.**
+> Reads your local git context, learns your style, and turns it into clear output — commit messages, standups, PR descriptions, and code archaeology.
 
+[![PyPI](https://img.shields.io/pypi/v/gitsage-ai.svg)](https://pypi.org/project/gitsage-ai/)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-163%20passing-brightgreen.svg)](#)
+[![Tests](https://img.shields.io/badge/tests-200%2B%20passing-brightgreen.svg)](#)
 
 ---
 
@@ -250,7 +255,7 @@ gitsage exposes your local git state as an MCP server. Once registered, any MCP-
 
 ```bash
 # 1. Install gitsage
-pip install git+https://github.com/Moyonx/gitsage.git
+pip install gitsage-ai
 
 # 2. Register with Claude Code or CatPaw
 claude mcp add gitsage -- gitsage mcp serve
