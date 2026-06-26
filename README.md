@@ -65,35 +65,34 @@ pip install gitsage-ai
 
 ### Configure
 
-The easiest way is the interactive wizard — it walks you through every option:
+The easiest way is the interactive wizard. It creates `~/.gitsage/config.yml` and supports every provider — including custom `base_url` for any OpenAI-compatible endpoint:
 
 ```bash
 gitsage setup
 ```
 
-Or configure manually. gitsage works with **any OpenAI-compatible API** (DeepSeek, OpenAI, Moonshot, SiliconFlow, Azure OpenAI, etc.) plus Anthropic and local Ollama:
+**Common quick-start options:**
 
 ```bash
 # Local model — free, nothing leaves your machine
-ollama pull qwen2.5:14b
-gitsage model set ollama/qwen2.5:14b
+ollama pull qwen2.5:14b && gitsage model set ollama/qwen2.5:14b
 
 # DeepSeek — recommended cloud option (~$0.001/commit)
-export DEEPSEEK_API_KEY=sk-...
-gitsage model set deepseek-v4-flash
+export DEEPSEEK_API_KEY=sk-... && gitsage model set deepseek-v4-flash
 
 # OpenAI
-export OPENAI_API_KEY=sk-...
-gitsage model set gpt-4o-mini
+export OPENAI_API_KEY=sk-... && gitsage model set gpt-4o-mini
+```
 
-# Any OpenAI-compatible endpoint (custom base_url)
-# Edit ~/.gitsage/config.yml:
-#
-# llm:
-#   provider: openai-compatible
-#   base_url: https://api.your-provider.com   # e.g. SiliconFlow, Moonshot, Azure…
-#   api_key: ${YOUR_API_KEY}
-#   model: your-model-name
+For any other OpenAI-compatible provider (SiliconFlow, Moonshot, Azure, self-hosted, etc.), run `gitsage setup` and enter your `base_url` + `api_key` + `model` when prompted. The config is saved to `~/.gitsage/config.yml` — you can also edit it directly:
+
+```yaml
+# ~/.gitsage/config.yml
+llm:
+  provider: openai-compatible
+  base_url: https://api.your-provider.com
+  api_key: sk-...
+  model: your-model-name
 ```
 
 ### Run
